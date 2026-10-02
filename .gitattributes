@@ -1,0 +1,14 @@
+# 统一换行符，避免 Windows / Linux 之间来回提交时产生整文件 diff
+* text=auto
+
+*.cs    text diff=csharp
+*.csproj text
+*.ps1   text
+*.md    text
+*.json  text
+
+# 二进制资源不要做换行转换
+*.ico   binary
+*.png   binary
+*.exe   binary
+*.dll   binary

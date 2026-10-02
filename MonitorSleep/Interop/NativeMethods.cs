@@ -1,0 +1,526 @@
+using System.Runtime.InteropServices;
+
+namespace MonitorSleep.Interop;
+
+/// <summary>
+/// 所有 Win32 原生调用的集中定义处。
+/// </summary>
+internal static class NativeMethods
+{
+    // ───────────────────────── 关屏：WM_SYSCOMMAND / SC_MONITORPOWER ─────────────────────────
+
+    public static readonly IntPtr HWND_BROADCAST = new(0xFFFF);
+    public const uint WM_SYSCOMMAND = 0x0112;
+    public const int SC_MONITORPOWER = 0xF170;
+    public const uint SMTO_ABORTIFHUNG = 0x0002;
+
+    public const int MONITOR_ON = -1;
+    public const int MONITOR_LOWPOWER = 1;
+    public const int MONITOR_OFF = 2;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
+
+    /// <summary>向所有顶层窗口广播显示器电源指令。-1 打开 / 1 低功耗 / 2 关闭。</summary>
+    public static bool BroadcastMonitorPower(int state)
+    {
+        try
+        {
+            var r = SendMessageTimeout(
+                HWND_BROADCAST, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)state,
+                SMTO_ABORTIFHUNG, 2000, out _);
+            // 广播时返回值是"处理了该消息的窗口数"，0 表示没有任何窗口响应。
+            return r != IntPtr.Zero;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // ───────────────────────── 空闲时长 ─────────────────────────
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LASTINPUTINFO
+    {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+    /// <summary>系统范围内距上次键鼠输入经过的时长。</summary>
+    public static TimeSpan GetIdleTime()
+    {
+        var lii = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        if (!GetLastInputInfo(ref lii))
+            return TimeSpan.Zero;
+
+        // dwTime 与 Environment.TickCount 都是 32 位且约 49.7 天回绕一次。
+        uint now = unchecked((uint)Environment.TickCount);
+        uint elapsed = unchecked(now - lii.dwTime);
+        return TimeSpan.FromMilliseconds(elapsed);
+    }
+
+    // ───────────────────────── 全屏 / 演示模式检测 ─────────────────────────
+
+    /// <summary>QUERY_USER_NOTIFICATION_STATE</summary>
+    public enum UserNotificationState
+    {
+        NotPresent = 1,
+        Busy = 2,
+        RunningD3dFullScreen = 3,
+        PresentationMode = 4,
+        AcceptsNotifications = 5,
+        QuietTime = 6,
+        App = 7,
+    }
+
+    [DllImport("shell32.dll")]
+    private static extern int SHQueryUserNotificationState(out int pquns);
+
+    /// <summary>取当前 shell 状态；失败返回 AcceptsNotifications（即"可以打扰"）。</summary>
+    public static UserNotificationState GetNotificationState()
+    {
+        try
+        {
+            if (SHQueryUserNotificationState(out int state) == 0)
+                return (UserNotificationState)state;
+        }
+        catch
+        {
+            // 忽略：降级为"可以打扰"
+        }
+        return UserNotificationState.AcceptsNotifications;
+    }
+
+    // ───────────────────────── 前台窗口是否真的占满整块屏幕 ─────────────────────────
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")]
+    private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+
+    /// <summary>
+    /// 判断前台窗口是否真的盖住了整块显示器。
+    /// SHQueryUserNotificationState 在某些环境下会误报 QUNS_BUSY，
+    /// 单靠它会导致"永远不关屏"，所以再核对一次窗口矩形。
+    /// </summary>
+    public static bool IsForegroundFullScreen(out string description)
+    {
+        description = "未知";
+        try
+        {
+            IntPtr hwnd = GetForegroundWindow();
+            if (hwnd == IntPtr.Zero)
+            {
+                description = "无前台窗口";
+                return false;
+            }
+
+            var sb = new System.Text.StringBuilder(256);
+            GetClassName(hwnd, sb, sb.Capacity);
+            string cls = sb.ToString();
+
+            // 桌面外壳与任务栏本来就铺满屏幕，不算"全屏程序"
+            if (cls is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Button" or "SysListView32")
+            {
+                description = $"桌面外壳（{cls}）";
+                return false;
+            }
+
+            if (!GetWindowRect(hwnd, out RECT wr))
+            {
+                description = $"{cls}：读取窗口矩形失败";
+                return false;
+            }
+
+            IntPtr monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            if (!GetMonitorInfo(monitor, ref mi))
+            {
+                description = $"{cls}：读取显示器信息失败";
+                return false;
+            }
+
+            bool full = wr.Left <= mi.rcMonitor.Left && wr.Top <= mi.rcMonitor.Top
+                     && wr.Right >= mi.rcMonitor.Right && wr.Bottom >= mi.rcMonitor.Bottom;
+
+            description = $"{cls} 窗口({wr.Left},{wr.Top})-({wr.Right},{wr.Bottom}) "
+                        + $"屏({mi.rcMonitor.Left},{mi.rcMonitor.Top})-({mi.rcMonitor.Right},{mi.rcMonitor.Bottom})"
+                        + $" → {(full ? "占满" : "未占满")}";
+            return full;
+        }
+        catch (Exception ex)
+        {
+            description = "检查失败：" + ex.Message;
+            return false;
+        }
+    }
+
+    // ───────────────────────── 执行状态（阻止系统睡眠 / 关屏） ─────────────────────────
+
+    [Flags]
+    public enum ExecutionState : uint
+    {
+        Continuous = 0x80000000,
+        SystemRequired = 0x00000001,
+        DisplayRequired = 0x00000002,
+        AwayModeRequired = 0x00000040,
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint SetThreadExecutionState(uint esFlags);
+
+    /// <summary>
+    /// 注意：该状态是"线程级"的，必须由长期存活的线程调用（本程序固定用 UI 线程）。
+    /// </summary>
+    public static void ApplyExecutionState(ExecutionState state) => SetThreadExecutionState((uint)state);
+
+    // ───────────────────────── 电源方案：关机屏超时（VIDEOIDLE） ─────────────────────────
+
+    public static readonly Guid GUID_VIDEO_SUBGROUP = new("7516b95f-f776-4464-8c53-06167f40cc99");
+    public static readonly Guid GUID_VIDEO_POWERDOWN_TIMEOUT = new("3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e");
+    public const uint ERROR_SUCCESS = 0;
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    private static extern uint PowerGetActiveScheme(IntPtr userRootPowerKey, out IntPtr activePolicyGuid);
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    private static extern uint PowerReadACValueIndex(
+        IntPtr rootPowerKey, ref Guid schemeGuid, ref Guid subGroupOfPowerSettingsGuid, ref Guid powerSettingGuid, out uint valueIndex);
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    private static extern uint PowerReadDCValueIndex(
+        IntPtr rootPowerKey, ref Guid schemeGuid, ref Guid subGroupOfPowerSettingsGuid, ref Guid powerSettingGuid, out uint valueIndex);
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    private static extern uint PowerWriteACValueIndex(
+        IntPtr rootPowerKey, ref Guid schemeGuid, ref Guid subGroupOfPowerSettingsGuid, ref Guid powerSettingGuid, uint valueIndex);
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    private static extern uint PowerWriteDCValueIndex(
+        IntPtr rootPowerKey, ref Guid schemeGuid, ref Guid subGroupOfPowerSettingsGuid, ref Guid powerSettingGuid, uint valueIndex);
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    private static extern uint PowerSetActiveScheme(IntPtr userRootPowerKey, ref Guid schemeGuid);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr hMem);
+
+    public static Guid? GetActiveScheme()
+    {
+        if (PowerGetActiveScheme(IntPtr.Zero, out IntPtr pGuid) != ERROR_SUCCESS || pGuid == IntPtr.Zero)
+            return null;
+        try
+        {
+            return Marshal.PtrToStructure<Guid>(pGuid);
+        }
+        finally
+        {
+            LocalFree(pGuid);
+        }
+    }
+
+    /// <summary>读取当前方案里"在此时间后关闭显示"的秒数（0 表示从不）。</summary>
+    public static bool TryReadVideoIdle(out uint acSeconds, out uint dcSeconds)
+    {
+        acSeconds = dcSeconds = 0;
+        Guid? scheme = GetActiveScheme();
+        if (scheme is null) return false;
+
+        Guid s = scheme.Value, sub = GUID_VIDEO_SUBGROUP, set = GUID_VIDEO_POWERDOWN_TIMEOUT;
+        uint ac, dc;
+        bool okAc = PowerReadACValueIndex(IntPtr.Zero, ref s, ref sub, ref set, out ac) == ERROR_SUCCESS;
+        bool okDc = PowerReadDCValueIndex(IntPtr.Zero, ref s, ref sub, ref set, out dc) == ERROR_SUCCESS;
+        acSeconds = ac;
+        dcSeconds = dc;
+        return okAc || okDc;
+    }
+
+    /// <summary>把"在此时间后关闭显示"改为指定秒数（0 = 从不）并立即生效。返回旧的交流/直流值。</summary>
+    public static bool TryWriteVideoIdle(uint acSeconds, uint dcSeconds, out uint oldAc, out uint oldDc)
+    {
+        oldAc = oldDc = 0;
+        Guid? scheme = GetActiveScheme();
+        if (scheme is null) return false;
+
+        Guid s = scheme.Value, sub = GUID_VIDEO_SUBGROUP, set = GUID_VIDEO_POWERDOWN_TIMEOUT;
+        if (!TryReadVideoIdle(out oldAc, out oldDc)) return false;
+
+        bool ok = PowerWriteACValueIndex(IntPtr.Zero, ref s, ref sub, ref set, acSeconds) == ERROR_SUCCESS
+               && PowerWriteDCValueIndex(IntPtr.Zero, ref s, ref sub, ref set, dcSeconds) == ERROR_SUCCESS
+               && PowerSetActiveScheme(IntPtr.Zero, ref s) == ERROR_SUCCESS;
+        return ok;
+    }
+
+    // ───────────────────────── 全局热键 ─────────────────────────
+
+    public const int WM_HOTKEY = 0x0312;
+
+    [Flags]
+    public enum HotKeyModifiers : uint
+    {
+        None = 0x0000,
+        Alt = 0x0001,
+        Control = 0x0002,
+        Shift = 0x0004,
+        Win = 0x0008,
+        NoRepeat = 0x4000,
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    // ───────────────────────── 会话 / 电源状态 ─────────────────────────
+
+    public const int SM_REMOTESESSION = 0x1000;
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
+
+    /// <summary>当前进程是否运行在远程桌面会话中。</summary>
+    public static bool IsRemoteSession()
+    {
+        try { return GetSystemMetrics(SM_REMOTESESSION) != 0; }
+        catch { return false; }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SYSTEM_POWER_STATUS
+    {
+        public byte ACLineStatus;      // 0 = 电池, 1 = 交流, 255 = 未知
+        public byte BatteryFlag;
+        public byte BatteryLifePercent; // 255 = 未知
+        public byte SystemStatusFlag;
+        public uint BatteryLifeTime;
+        public uint BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
+
+    public static bool TryGetPowerStatus(out SYSTEM_POWER_STATUS status) => GetSystemPowerStatus(out status);
+
+    // ───────────────────────── 唤醒用的合成输入 ─────────────────────────
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HARDWAREINPUT
+    {
+        public uint uMsg;
+        public ushort wParamL;
+        public ushort wParamH;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    public struct INPUTUNION
+    {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT
+    {
+        public uint type;
+        public INPUTUNION u;
+    }
+
+    public const uint INPUT_MOUSE = 0;
+    public const uint MOUSEEVENTF_MOVE = 0x0001;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint nInputs, [In] INPUT[] pInputs, int cbSize);
+
+    /// <summary>
+    /// 鼠标相对移动 1 像素后立刻移回，光标净位移为 0。
+    /// 用于把显示器从待机状态"顶"回来 —— 部分驱动不响应 SC_MONITORPOWER(-1)。
+    /// </summary>
+    public static bool JiggleMouse()
+    {
+        int size = Marshal.SizeOf<INPUT>();
+        if (size != 40 && IntPtr.Size == 8)
+            return false; // 结构布局异常时宁可不做，也不要乱动光标
+
+        var inputs = new INPUT[2];
+        inputs[0].type = INPUT_MOUSE;
+        inputs[0].u.mi = new MOUSEINPUT { dx = 1, dy = 0, dwFlags = MOUSEEVENTF_MOVE };
+        inputs[1].type = INPUT_MOUSE;
+        inputs[1].u.mi = new MOUSEINPUT { dx = -1, dy = 0, dwFlags = MOUSEEVENTF_MOVE };
+
+        return SendInput((uint)inputs.Length, inputs, size) == inputs.Length;
+    }
+
+    /// <summary>诊断用：核对 INPUT 结构布局是否符合 Win32 预期（x64 下应为 40 字节）。</summary>
+    public static string INPUTSizeDescription()
+    {
+        int size = Marshal.SizeOf<INPUT>();
+        int mouseSize = Marshal.SizeOf<MOUSEINPUT>();
+        bool ok = IntPtr.Size != 8 || size == 40;
+        return $"INPUT={size} 字节, MOUSEINPUT={mouseSize} 字节, 指针={IntPtr.Size * 8} 位 → {(ok ? "符合预期" : "布局异常，鼠标抖动将被禁用")}";
+    }
+
+    // ───────────────────────── 系统睡眠 ─────────────────────────
+
+    private const int TOKEN_ADJUST_PRIVILEGES = 0x0020;
+    private const int TOKEN_QUERY = 0x0008;
+    private const int SE_PRIVILEGE_ENABLED = 0x0002;
+    private const string SE_SHUTDOWN_NAME = "SeShutdownPrivilege";
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LUID_AND_ATTRIBUTES
+    {
+        public long Luid;
+        public int Attributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TOKEN_PRIVILEGES
+    {
+        public int PrivilegeCount;
+        public LUID_AND_ATTRIBUTES Privilege;
+    }
+
+    [DllImport("powrprof.dll", SetLastError = true)]
+    private static extern bool SetSuspendState(bool hibernate, bool forceCritical, bool disableWakeEvent);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr processHandle, int desiredAccess, out IntPtr tokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool LookupPrivilegeValue(string? systemName, string name, out long luid);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool AdjustTokenPrivileges(
+        IntPtr tokenHandle, bool disableAllPrivileges, ref TOKEN_PRIVILEGES newState,
+        int bufferLength, IntPtr previousState, IntPtr returnLength);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    /// <summary>
+    /// 让电脑进入睡眠。
+    ///
+    /// 睡眠需要 SeShutdownPrivilege —— 普通用户令牌里通常持有这个权限，但默认是禁用状态，
+    /// 所以先显式打开再调用。失败时退回系统自带的 rundll32 入口再试一次。
+    /// </summary>
+    public static bool TrySystemSleep(out string error)
+    {
+        error = string.Empty;
+        try
+        {
+            EnableShutdownPrivilege();
+
+            if (SetSuspendState(false, false, false))
+                return true;
+
+            int code = Marshal.GetLastWin32Error();
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                    "rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                });
+                return true;
+            }
+            catch
+            {
+                error = $"SetSuspendState 失败（错误码 {code}），备用方式也未能启动。";
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static void EnableShutdownPrivilege()
+    {
+        IntPtr token = IntPtr.Zero;
+        try
+        {
+            if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, out token)) return;
+            if (!LookupPrivilegeValue(null, SE_SHUTDOWN_NAME, out long luid)) return;
+
+            var privileges = new TOKEN_PRIVILEGES
+            {
+                PrivilegeCount = 1,
+                Privilege = new LUID_AND_ATTRIBUTES { Luid = luid, Attributes = SE_PRIVILEGE_ENABLED },
+            };
+            AdjustTokenPrivileges(token, false, ref privileges, 0, IntPtr.Zero, IntPtr.Zero);
+        }
+        catch
+        {
+            // 打不开也无所谓，SetSuspendState 自己会给出结果
+        }
+        finally
+        {
+            if (token != IntPtr.Zero) CloseHandle(token);
+        }
+    }
+}
