@@ -12,3 +12,6 @@
 *.png   binary
 *.exe   binary
 *.dll   binary
+
+# 许可证全文必须逐字节保持原样（FSF 原文使用 LF）
+LICENSE text eol=lf
