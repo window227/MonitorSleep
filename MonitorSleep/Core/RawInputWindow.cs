@@ -19,7 +19,7 @@ namespace MonitorSleep.Core;
 /// </summary>
 internal sealed class RawInputWindow : Form
 {
-    private IntPtr _displayNotification;
+    private readonly List<IntPtr> _displayNotifications = new();
 
     /// <summary>最近一次「真人操作」发生的时刻（Environment.TickCount）。</summary>
     public uint LastGenuineInputTick { get; private set; }
@@ -60,8 +60,15 @@ internal sealed class RawInputWindow : Form
             return;
         }
 
-        _displayNotification = NativeMethods.RegisterDisplayStateNotification(handle);
-        if (_displayNotification == IntPtr.Zero)
+        // 两条通知 GUID 都注册 —— 实测其中一条在有些环境下一条都收不到，
+        // 哪条先到都算数。
+        foreach (Guid guid in new[] { NativeMethods.GuidConsoleDisplayState, NativeMethods.GuidMonitorPowerOn })
+        {
+            IntPtr token = NativeMethods.RegisterDisplayStateNotification(handle, guid);
+            if (token != IntPtr.Zero) _displayNotifications.Add(token);
+        }
+
+        if (_displayNotifications.Count == 0)
         {
             UnavailableReason = $"RegisterPowerSettingNotification 失败（错误码 {Marshal.GetLastWin32Error()}）";
             return;
@@ -75,6 +82,12 @@ internal sealed class RawInputWindow : Form
 
     /// <summary>诊断计数：窗口一共收到多少条 WM_POWERBROADCAST。</summary>
     public int PowerBroadcastMessages { get; private set; }
+
+    /// <summary>诊断计数：其中属于"设置变化"（PBT_POWERSETTINGCHANGE）的有多少条。</summary>
+    public int PowerSettingChangeMessages { get; private set; }
+
+    /// <summary>诊断用：最近一条设置变化消息的原始内容。</summary>
+    public string LastPowerSettingDetail { get; private set; } = "（一条都没收到）";
 
     /// <summary>诊断计数：其中属于"显示器开关状态"的有多少条。</summary>
     public int DisplayStateChanges { get; private set; }
@@ -92,7 +105,10 @@ internal sealed class RawInputWindow : Form
         {
             PowerBroadcastMessages++;
             if (m.WParam.ToInt32() == NativeMethods.PBT_POWERSETTINGCHANGE)
+            {
+                PowerSettingChangeMessages++;
                 ReadDisplayState(m.LParam);
+            }
         }
 
         base.WndProc(ref m);
@@ -109,15 +125,24 @@ internal sealed class RawInputWindow : Form
         {
             var guidBytes = new byte[16];
             Marshal.Copy(lParam, guidBytes, 0, 16);
-            if (new Guid(guidBytes) != NativeMethods.GuidConsoleDisplayState) return;
+            Guid received = new(guidBytes);
+            uint dataLength = (uint)Marshal.ReadInt32(lParam, 16);
+            byte value = Marshal.ReadByte(lParam, 20);
 
-            byte state = Marshal.ReadByte(lParam, 20);
-            IsDisplayOff = state == 0;   // 变暗(2) 视作仍然点亮
+            // 把原始内容记下来：只有看到真实收到的 GUID，才能判断
+            // 是"通知压根没来"还是"来了但我们的比较写错了"
+            LastPowerSettingDetail =
+                $"最近一条设置变化：GUID={received} 长度={dataLength} 值={value}";
+
+            if (received != NativeMethods.GuidConsoleDisplayState &&
+                received != NativeMethods.GuidMonitorPowerOn) return;
+
+            IsDisplayOff = value == 0;   // 变暗(2) 视作仍然点亮
             DisplayStateChanges++;
         }
-        catch
+        catch (Exception ex)
         {
-            // 结构对不上就算了，宁可漏报也不要误判
+            LastPowerSettingDetail = "解析设置变化失败：" + ex.Message;
         }
     }
 
@@ -152,15 +177,9 @@ internal sealed class RawInputWindow : Form
     ///   1) 合成一次 1 像素鼠标移动，看 WM_INPUT 有没有送达（光标只动 1 像素，基本无感）
     ///   2) 把屏幕关掉再打开，看显示状态通知有没有送达（屏幕会黑约 2 秒）
     /// </summary>
-    public IReadOnlyList<string> SelfTest()
+    public IReadOnlyList<string> SelfTest(TimeSpan? idleFallback)
     {
         var lines = new List<string>();
-
-        if (!DisplayStateTrackingAvailable)
-        {
-            lines.Add($"  状态            : ❌ {StatusText}");
-            return lines;
-        }
 
         // ── 1) 光标位移判据（兜底，不依赖 Raw Input） ──
         Point origin = Cursor.Position;
@@ -204,9 +223,15 @@ internal sealed class RawInputWindow : Form
 
         lines.Add(sawOff
             ? $"  显示状态通知    : ✅ 检测到屏幕被关闭（共 {DisplayStateChanges} 次状态变化）"
-            : $"  显示状态通知    : ❌ 没检测到（收到 {PowerBroadcastMessages} 条 WM_POWERBROADCAST，"
-              + $"其中显示器状态 {DisplayStateChanges} 条 —— "
-              + (PowerBroadcastMessages == 0 ? "电源消息没送到窗口" : "送到了但没有显示器状态那条") + "）");
+            : $"  显示状态通知    : ❌ 没检测到（WM_POWERBROADCAST {PowerBroadcastMessages} 条，"
+              + $"其中设置变化 {PowerSettingChangeMessages} 条，匹配显示器状态 {DisplayStateChanges} 条）");
+        lines.Add($"  期望的 GUID     : {NativeMethods.GuidConsoleDisplayState} 或 {NativeMethods.GuidMonitorPowerOn}");
+        lines.Add($"  {LastPowerSettingDetail}");
+
+        // 通知收不到时靠这条退路，所以它才是"能不能用"的真正依据
+        lines.Add(idleFallback is TimeSpan fb
+            ? $"  空闲推断退路    : ✅ 系统关屏超时 {fb.TotalSeconds:0} 秒 —— 通知收不到也能工作"
+            : "  空闲推断退路    : ❌ 不可用");
 
         IsDisplayOff = false;   // 自检会打乱状态，复位
         return lines;
@@ -216,8 +241,9 @@ internal sealed class RawInputWindow : Form
     {
         if (disposing)
         {
-            NativeMethods.UnregisterDisplayStateNotification(_displayNotification);
-            _displayNotification = IntPtr.Zero;
+            foreach (IntPtr token in _displayNotifications)
+                NativeMethods.UnregisterDisplayStateNotification(token);
+            _displayNotifications.Clear();
         }
         base.Dispose(disposing);
     }

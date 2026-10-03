@@ -232,7 +232,7 @@ internal static class Program
         try
         {
             using var rawInput = new Core.RawInputWindow();
-            foreach (string l in rawInput.SelfTest()) Line(l);
+            foreach (string l in rawInput.SelfTest(Core.MonitorController.SystemVideoTimeoutFor(settings))) Line(l);
         }
         catch (Exception ex)
         {

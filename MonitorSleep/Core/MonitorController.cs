@@ -514,6 +514,66 @@ internal sealed class MonitorController : IDisposable
 
     private void EndDisplayOffSession() => _displayOffTick = null;
 
+    private bool _inferredDisplayOff;
+
+    /// <summary>
+    /// 屏幕当前是不是关着的。
+    ///
+    /// 优先用系统通知（精确，事实）。但实测在某些环境下
+    /// RegisterPowerSettingNotification 注册成功却一条通知都收不到
+    /// （两条 GUID 都试过，0 条），所以必须有退路。
+    /// </summary>
+    private bool CurrentDisplayOff()
+    {
+        if (_rawInput is null) return false;
+
+        // 收到过通知 → 以通知为准
+        if (_rawInput.DisplayStateChanges > 0) return _rawInput.IsDisplayOff;
+
+        return InferDisplayOffFromIdle();
+    }
+
+    /// <summary>
+    /// 退路：靠空闲时间推断屏幕状态。
+    ///
+    /// 依据是"空闲时间已经超过系统关屏超时" —— 那屏幕正常就该关了。
+    /// 空闲一旦归零，说明刚从关闭状态被唤醒。
+    ///
+    /// 这是推断不是事实，所以取交流 / 电池两个超时里较小的那个（更早触发，
+    /// 宁可多管一次也不要漏掉）。接管模式下系统超时被改成了"从不"，此时返回 false，
+    /// 那种情况由我们自己的 _displayOffTick 负责。
+    /// </summary>
+    private bool InferDisplayOffFromIdle()
+    {
+        TimeSpan? timeout = SystemVideoTimeout();
+        if (timeout is not TimeSpan limit) return false;
+
+        TimeSpan idle = NativeMethods.GetIdleTime();
+
+        if (idle >= limit) { _inferredDisplayOff = true; return true; }
+        if (idle < TimeSpan.FromSeconds(2)) { _inferredDisplayOff = false; return false; }
+
+        return _inferredDisplayOff;   // 中间地带维持上一次判断，避免抖动
+    }
+
+    private TimeSpan? SystemVideoTimeout() => SystemVideoTimeoutFor(_settings);
+
+    /// <summary>
+    /// 从配置里保存的系统超时原值推算当前关屏超时。
+    /// 接管模式下系统超时被改成了"从不"，此时返回 null。
+    /// </summary>
+    public static TimeSpan? SystemVideoTimeoutFor(AppSettings settings)
+    {
+        if (settings.TakeOverSystemTimeout) return null;
+
+        uint ac = settings.SavedAcVideoIdle;
+        uint dc = settings.SavedDcVideoIdle;
+        if (ac == 0 && dc == 0) return null;
+
+        uint seconds = ac == 0 ? dc : dc == 0 ? ac : Math.Min(ac, dc);
+        return TimeSpan.FromSeconds(Math.Max(30u, seconds));
+    }
+
     /// <summary>
     /// 伪唤醒抑制。
     ///
@@ -527,18 +587,18 @@ internal sealed class MonitorController : IDisposable
     /// </summary>
     private void TrackSpuriousWake()
     {
-        if (_rawInput is null || !_rawInput.DisplayStateTrackingAvailable) return;
+        if (_rawInput is null) return;
 
         // 兜底判据：光标动过就算真实输入（不依赖 Raw Input）
         _rawInput.PollCursorFallback();
 
         if (!_settings.SuppressSpuriousWake)
         {
-            _displayWasOff = _rawInput.IsDisplayOff;   // 保持同步，勾选后立刻可用
+            _displayWasOff = CurrentDisplayOff();
             return;
         }
 
-        bool displayOff = _rawInput.IsDisplayOff;
+        bool displayOff = CurrentDisplayOff();
 
         if (displayOff)
         {

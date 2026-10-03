@@ -534,6 +534,14 @@ internal static class NativeMethods
     /// <summary>显示器开关状态变化时，系统会按这个 GUID 通知我们。</summary>
     public static readonly Guid GuidConsoleDisplayState = new("6fe69556-704a-47a0-8f24-c28d936fda47");
 
+    /// <summary>
+    /// 较老但更通用的「显示器开 / 关」通知 GUID。
+    ///
+    /// 实测 GUID_CONSOLE_DISPLAY_STATE 在某些环境下一条通知都收不到，
+    /// 所以两条都注册上 —— 哪条先到都算数。
+    /// </summary>
+    public static readonly Guid GuidMonitorPowerOn = new("02731015-4510-4526-99e6-e5a17ebd1aea");
+
     private const uint RIDEV_INPUTSINK = 0x00000100;
     private const uint RID_INPUT = 0x10000003;
     private const uint RIM_TYPEMOUSE = 0;
@@ -606,9 +614,9 @@ internal static class NativeMethods
         return RegisterRawInputDevices(devices, (uint)devices.Length, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
     }
 
-    public static IntPtr RegisterDisplayStateNotification(IntPtr hwnd)
+    public static IntPtr RegisterDisplayStateNotification(IntPtr hwnd, Guid powerSetting)
     {
-        Guid guid = GuidConsoleDisplayState;   // readonly 字段不能按 ref 传，先复制一份
+        Guid guid = powerSetting;   // 按 ref 传需要可写变量
         return RegisterPowerSettingNotification(hwnd, ref guid, DEVICE_NOTIFY_WINDOW_HANDLE);
     }
 
