@@ -227,6 +227,18 @@ internal static class Program
                 Line("  · " + failure);
         }
 
+        Line("");
+        Line("--- 伪唤醒抑制自检 ---");
+        try
+        {
+            using var rawInput = new Core.RawInputWindow();
+            foreach (string l in rawInput.SelfTest()) Line(l);
+        }
+        catch (Exception ex)
+        {
+            Line($"  ❌ 自检失败：{ex.Message}");
+        }
+
         if (testSleep)
         {
             Line("");
