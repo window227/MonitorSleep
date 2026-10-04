@@ -335,7 +335,7 @@ internal sealed class TrayContext : ApplicationContext
     private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
     {
         if (e.Mode == Microsoft.Win32.PowerModes.Resume)
-            _controller.NoteUserReturned();
+            _controller.NoteResumed();
     }
 
     private void OnSessionEnding(object sender, Microsoft.Win32.SessionEndingEventArgs e)

@@ -121,6 +121,16 @@ public sealed class AppSettings
     /// </summary>
     public bool SuppressSpuriousWake { get; set; }
 
+    /// <summary>
+    /// 睡眠侧的伪唤醒抑制：电脑被"没人碰过"的事件唤醒时，让它继续睡。
+    ///
+    /// 和屏幕侧同源 —— 无线鼠标切换节能模式发出的零位移报告不光会点亮屏幕，
+    /// 也会把电脑从睡眠里叫醒。
+    ///
+    /// 比屏幕侧更强势（会真的让系统再次入睡），所以单独一个开关，同样默认关闭。
+    /// </summary>
+    public bool ResleepAfterSpuriousWake { get; set; }
+
     // ── 系统集成 ──
     public bool AutoStart { get; set; }
     /// <summary>是否已经给用户看过"托盘图标可能被折叠"的首次运行提示。</summary>

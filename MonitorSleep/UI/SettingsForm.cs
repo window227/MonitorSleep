@@ -63,6 +63,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _overlay = new() { Text = "关屏失败时改用全屏黑窗遮盖兜底", AutoSize = true };
     private readonly CheckBox _autoStart = new() { Text = "开机自动启动", AutoSize = true };
     private readonly CheckBox _suppressWake = new() { Text = "抑制伪唤醒（屏幕被无效输入点亮时自动关回去）", AutoSize = true };
+    private readonly CheckBox _resleepWake = new() { Text = "电脑被无效输入唤醒时，让它继续睡", AutoSize = true };
 
     /// <param name="initialTab">打开时选中哪个标签页（按标题匹配），null 表示第一个。</param>
     public SettingsForm(MonitorController controller, string? initialTab = null)
@@ -289,12 +290,14 @@ internal sealed class SettingsForm : Form
 
         Header(t, "伪唤醒抑制");
         Span(t, _suppressWake);
+        Span(t, _resleepWake);
         Span(t, new Label
         {
             Text = "有些无线鼠标每隔几分钟会切换一次节能模式，期间发出一条「零位移」报告。\n"
-                 + "Windows 把它当成用户回来了，于是把刚关掉的屏幕又点亮 —— 屏幕就这样反复自己亮。\n"
-                 + "打开后本程序会识别这种无效输入，把屏幕重新关回去。\n"
-                 + "只有真实的鼠标移动、按键或键盘操作才会打断它；连续抑制 8 次后会自动放弃。\n"
+                 + "Windows 把它当成用户回来了，于是把刚关掉的屏幕点亮、甚至把电脑从睡眠里叫醒。\n"
+                 + "打开后本程序会识别这种无效输入：屏幕被点亮就关回去，电脑被叫醒就让它继续睡。\n"
+                 + "只有真实的鼠标移动、按键或键盘操作才会打断它；连续抑制 8 次 / 送回睡眠 3 次后自动放弃。\n"
+                 + "恢复后会留 6 秒反应时间，够你动一下鼠标把它取消。\n"
                  + "先试设备管理器和鼠标驱动的省电设置，那些才是根治；这一项是兜底。",
             AutoSize = true,
             MaximumSize = new Size(540, 0),
@@ -542,6 +545,7 @@ internal sealed class SettingsForm : Form
         _jiggle.Checked = _draft.JiggleOnWake;
         _overlay.Checked = _draft.OverlayFallback;
         _suppressWake.Checked = _draft.SuppressSpuriousWake;
+        _resleepWake.Checked = _draft.ResleepAfterSpuriousWake;
         _autoStart.Checked = AutostartService.IsEnabled();
 
         RefreshStateLabels();
@@ -638,6 +642,7 @@ internal sealed class SettingsForm : Form
         _draft.JiggleOnWake = _jiggle.Checked;
         _draft.OverlayFallback = _overlay.Checked;
         _draft.SuppressSpuriousWake = _suppressWake.Checked;
+        _draft.ResleepAfterSpuriousWake = _resleepWake.Checked;
 
         // 开机自启直接落到注册表
         if (_autoStart.Checked != AutostartService.IsEnabled())

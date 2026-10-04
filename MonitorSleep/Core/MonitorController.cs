@@ -53,6 +53,16 @@ internal sealed class MonitorController : IDisposable
     /// <summary>连续抑制次数上限，避免和用户"打架"打成死循环。</summary>
     private const int MaxResuppress = 8;
 
+    // ── 睡眠侧的伪唤醒抑制 ──
+    private uint? _resumedTick;
+    private int _resleepCount;
+
+    /// <summary>连续送回睡眠的次数上限，同样防止和用户抢。</summary>
+    private const int MaxResleep = 3;
+
+    /// <summary>从睡眠恢复后留这么多秒反应时间，期间一有真实输入就放弃重新入睡。</summary>
+    private static readonly TimeSpan ResleepGrace = TimeSpan.FromSeconds(6);
+
     public MonitorController(SettingsStore store)
     {
         _store = store;
@@ -459,6 +469,7 @@ internal sealed class MonitorController : IDisposable
     {
         TrackDisplayState();
         TrackSpuriousWake();
+        TrackSpuriousResume();
 
         // 有关屏请求在排队时用更快的节拍轮询，关起来才跟手
         _tickTimer.Interval = _quietWaitSince is not null ? 100 : 1000;
@@ -513,6 +524,53 @@ internal sealed class MonitorController : IDisposable
     }
 
     private void EndDisplayOffSession() => _displayOffTick = null;
+
+    /// <summary>
+    /// 从睡眠恢复时由 UI 层调用：记下时刻，随后判断这次唤醒是不是"没人碰过"。
+    /// </summary>
+    public void NoteResumed()
+    {
+        NoteUserReturned();
+
+        _resumedTick = _settings.SuppressSpuriousWake && _settings.ResleepAfterSpuriousWake
+            ? unchecked((uint)Environment.TickCount)
+            : null;
+    }
+
+    /// <summary>
+    /// 睡眠侧的伪唤醒抑制：电脑被"没人碰过"的事件唤醒时，让它继续睡。
+    ///
+    /// 判据和屏幕侧完全一样 —— Raw Input 和光标位移都认不出真实输入，
+    /// 就说明这次唤醒不是人干的（典型来源还是无线鼠标的节能模式切换）。
+    ///
+    /// 恢复后先留 6 秒反应时间：真醒了的人会动鼠标或按键，那时立刻放弃。
+    /// </summary>
+    private void TrackSpuriousResume()
+    {
+        if (_resumedTick is not uint resumed) return;
+
+        bool genuine = _rawInput is not null &&
+                       unchecked((int)(_rawInput.LastGenuineInputTick - resumed)) > 0;
+
+        if (genuine)
+        {
+            _resumedTick = null;
+            _resleepCount = 0;   // 真人回来了，计数归零
+            return;
+        }
+
+        uint now = unchecked((uint)Environment.TickCount);
+        if (TimeSpan.FromMilliseconds(now - resumed) < ResleepGrace) return;
+
+        _resumedTick = null;
+
+        if (_resleepCount >= MaxResleep) return;
+        _resleepCount++;
+
+        LastBlockReason = "已把被伪唤醒的电脑送回睡眠";
+        PerformSystemSleep();
+        StateChanged?.Invoke();
+    }
 
     private bool _inferredDisplayOff;
 
