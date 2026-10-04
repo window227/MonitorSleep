@@ -106,8 +106,6 @@ public sealed class AppSettings
     // ── 关屏行为 ──
     public bool ShowCountdown { get; set; } = true;
     public int CountdownSeconds { get; set; } = 5;
-    /// <summary>唤醒时轻微抖动鼠标 1 像素（部分驱动不响应 SC_MONITORPOWER(-1)）。</summary>
-    public bool JiggleOnWake { get; set; } = true;
     /// <summary>关屏失败时改用全屏黑窗遮盖兜底。</summary>
     public bool OverlayFallback { get; set; } = true;
 

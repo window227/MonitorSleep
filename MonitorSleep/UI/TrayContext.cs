@@ -134,8 +134,6 @@ internal sealed class TrayContext : ApplicationContext
             _controller.Settings.ShowCountdown ? $"关屏（{_controller.Settings.CountdownSeconds} 秒倒计时）" : "关屏", null,
             (_, _) => _controller.SleepNow(SleepTrigger.Manual));
         _menu.Items.Add(sleepItem);
-        _menu.Items.Add(new ToolStripMenuItem("唤醒屏幕", null,
-            (_, _) => _controller.WakeNow()));
         _menu.Items.Add(new ToolStripMenuItem("让电脑睡眠", null,
             (_, _) => _controller.SystemSleep()));
 

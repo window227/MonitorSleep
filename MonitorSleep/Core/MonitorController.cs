@@ -217,27 +217,10 @@ internal sealed class MonitorController : IDisposable
         BeginSleep(trigger);
     }
 
-    public void WakeNow()
-    {
-        _quietWaitSince = null;   // 取消排队中的关屏
-        EndDisplayOffSession();
-
-        NativeMethods.BroadcastMonitorPower(NativeMethods.MONITOR_ON);
-
-        if (_settings.JiggleOnWake)
-        {
-            // 部分驱动不认 SC_MONITORPOWER(-1)，用 1 像素的相对移动把显示管线顶起来
-            try
-            {
-                System.Threading.Thread.Sleep(120);
-                NativeMethods.JiggleMouse();
-            }
-            catch { /* 忽略 */ }
-        }
-
-        ApplyExecutionState();
-        StateChanged?.Invoke();
-    }
+    // 原本这里有个 WakeNow()：广播 SC_MONITORPOWER(-1) 主动点亮屏幕。
+    // 去掉是因为它没有必要 —— 动一下键鼠 Windows 就会把屏幕点亮，
+    // 单留一个「唤醒」入口反而让人以为不点就醒不了。
+    // 它的两个调用点（设置界面按钮、托盘菜单项）都已移除。
 
     public void ScheduleOff(TimeSpan delay)
     {

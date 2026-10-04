@@ -59,7 +59,6 @@ internal sealed class SettingsForm : Form
     // 行为
     private readonly CheckBox _showCountdown = new() { Text = "关屏前显示倒计时（可取消，手动触发也生效）", AutoSize = true };
     private readonly NoWheelNumericUpDown _countdownSeconds = new() { Minimum = 1, Maximum = 120, Width = 90 };
-    private readonly CheckBox _jiggle = new() { Text = "唤醒时轻微抖动鼠标 1 像素（兼容不响应唤醒指令的驱动）", AutoSize = true };
     private readonly CheckBox _overlay = new() { Text = "关屏失败时改用全屏黑窗遮盖兜底", AutoSize = true };
     private readonly CheckBox _autoStart = new() { Text = "开机自动启动", AutoSize = true };
     private readonly CheckBox _suppressWake = new() { Text = "抑制伪唤醒（屏幕被无效输入点亮时自动关回去）", AutoSize = true };
@@ -419,8 +418,7 @@ internal sealed class SettingsForm : Form
     private TabPage BuildBehaviorPage()
     {
         var t = NewTable();
-        Header(t, "唤醒");
-        Span(t, _jiggle);
+        Header(t, "兜底");
         Span(t, _overlay);
 
         Header(t, "启动");
@@ -571,7 +569,6 @@ internal sealed class SettingsForm : Form
 
         _showCountdown.Checked = _draft.ShowCountdown;
         _countdownSeconds.Value = Clamp(_draft.CountdownSeconds, _countdownSeconds);
-        _jiggle.Checked = _draft.JiggleOnWake;
         _overlay.Checked = _draft.OverlayFallback;
         _suppressWake.Checked = _draft.SuppressSpuriousWake;
         _resleepWake.Checked = _draft.ResleepAfterSpuriousWake;
@@ -708,7 +705,6 @@ internal sealed class SettingsForm : Form
 
         _draft.ShowCountdown = _showCountdown.Checked;
         _draft.CountdownSeconds = (int)_countdownSeconds.Value;
-        _draft.JiggleOnWake = _jiggle.Checked;
         _draft.OverlayFallback = _overlay.Checked;
         _draft.SuppressSpuriousWake = _suppressWake.Checked;
         _draft.ResleepAfterSpuriousWake = _resleepWake.Checked;
