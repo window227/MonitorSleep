@@ -274,6 +274,7 @@ MonitorSleep.exe --diagnose --out 报告.txt
 ```
 build.ps1                 构建脚本
 README.md                 本文件
+CHANGELOG.md              版本变更记录
 MonitorSleep\             源代码
   app.ico                   程序图标（资源管理器 / 任务栏 / 快捷方式显示）
   Program.cs                入口、单实例、崩溃兜底、诊断模式
