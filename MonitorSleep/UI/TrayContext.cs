@@ -122,6 +122,12 @@ internal sealed class TrayContext : ApplicationContext
             _menu.Items.Add(new ToolStripMenuItem($"「{mins} 分钟后关屏」已排定") { Enabled = false });
         }
 
+        if (_controller.ScheduledSleepAt is DateTime sleepAt)
+        {
+            int mins = Math.Max(0, (int)(sleepAt - DateTime.Now).TotalMinutes);
+            _menu.Items.Add(new ToolStripMenuItem($"「{mins} 分钟后睡眠」已排定") { Enabled = false });
+        }
+
         _menu.Items.Add(new ToolStripSeparator());
 
         var sleepItem = new ToolStripMenuItem(
@@ -133,6 +139,10 @@ internal sealed class TrayContext : ApplicationContext
         _menu.Items.Add(new ToolStripMenuItem("让电脑睡眠", null,
             (_, _) => _controller.SystemSleep()));
 
+        // 两个定时器都有时，「取消定时」两处都能点，且都是取消全部 ——
+        // 一个 ToolStripMenuItem 只能挂在一个父菜单下，所以这里建两个实例。
+        bool anyScheduled = _controller.ScheduledOffAt is not null || _controller.ScheduledSleepAt is not null;
+
         var timed = new ToolStripMenuItem("定时关屏");
         foreach (int minutes in new[] { 5, 15, 30, 45, 60, 90, 120 })
         {
@@ -141,12 +151,25 @@ internal sealed class TrayContext : ApplicationContext
                 (_, _) => _controller.ScheduleOff(TimeSpan.FromMinutes(m))));
         }
         timed.DropDownItems.Add(new ToolStripSeparator());
-        var cancelTimer = new ToolStripMenuItem("取消定时", null, (_, _) => _controller.CancelScheduledOff())
+        timed.DropDownItems.Add(new ToolStripMenuItem("取消定时", null, (_, _) => _controller.CancelAllScheduled())
         {
-            Enabled = _controller.ScheduledOffAt is not null,
-        };
-        timed.DropDownItems.Add(cancelTimer);
+            Enabled = anyScheduled,
+        });
         _menu.Items.Add(timed);
+
+        var timedSleep = new ToolStripMenuItem("定时睡眠");
+        foreach (int minutes in new[] { 5, 15, 30, 45, 60, 90, 120 })
+        {
+            int m = minutes;
+            timedSleep.DropDownItems.Add(new ToolStripMenuItem($"{m} 分钟后", null,
+                (_, _) => _controller.ScheduleSleep(TimeSpan.FromMinutes(m))));
+        }
+        timedSleep.DropDownItems.Add(new ToolStripSeparator());
+        timedSleep.DropDownItems.Add(new ToolStripMenuItem("取消定时", null, (_, _) => _controller.CancelAllScheduled())
+        {
+            Enabled = anyScheduled,
+        });
+        _menu.Items.Add(timedSleep);
 
         _menu.Items.Add(new ToolStripSeparator());
 

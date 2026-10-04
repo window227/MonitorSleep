@@ -39,6 +39,7 @@ internal sealed class MonitorController : IDisposable
     private SleepTrigger _quietWaitTrigger;
     private DateTime? _lastUnlockAt;
     private DateTime? _scheduledOffAt;
+    private DateTime? _scheduledSleepAt;
     private bool _executionStateApplied;
     private bool _sleepPending;
     private bool _systemSleepPending;
@@ -103,6 +104,9 @@ internal sealed class MonitorController : IDisposable
     public bool IsSleepQueued => _quietWaitSince is not null;
     public string LastBlockReason { get; private set; } = string.Empty;
     public DateTime? ScheduledOffAt => _scheduledOffAt;
+
+    /// <summary>「N 分钟后睡眠」的到点时刻；null 表示没排定。</summary>
+    public DateTime? ScheduledSleepAt => _scheduledSleepAt;
     public string PowerSchemeSummary => _powerScheme.DescribeCurrent();
     public string PowerSchemeSavedSummary => _powerScheme.DescribeSaved();
 
@@ -111,13 +115,18 @@ internal sealed class MonitorController : IDisposable
         ? "正在关屏…"
         : _displayOffTick is not null ? "屏幕已关闭" : "屏幕开启";
 
-    /// <summary>空闲自动关屏 / 定时关屏的进度。</summary>
+    /// <summary>空闲自动关屏 / 定时关屏 / 定时睡眠的进度。</summary>
     public string AutoOffStatusText
     {
         get
         {
-            if (_scheduledOffAt is DateTime at)
-                return $"{Math.Max(0, (int)(at - DateTime.Now).TotalMinutes)} 分钟后关屏";
+            var timers = new List<string>(2);
+            if (_scheduledOffAt is DateTime offAt)
+                timers.Add($"{Math.Max(0, (int)(offAt - DateTime.Now).TotalMinutes)} 分钟后关屏");
+            if (_scheduledSleepAt is DateTime sleepAt)
+                timers.Add($"{Math.Max(0, (int)(sleepAt - DateTime.Now).TotalMinutes)} 分钟后睡眠");
+            if (timers.Count > 0)
+                return string.Join(" · ", timers);
 
             if (!_settings.IdleAutoOffEnabled)
                 return "空闲自动关屏已停用";
@@ -239,6 +248,27 @@ internal sealed class MonitorController : IDisposable
     public void CancelScheduledOff()
     {
         _scheduledOffAt = null;
+        StateChanged?.Invoke();
+    }
+
+    /// <summary>「N 分钟后让电脑睡眠」—— 和定时关屏对称。</summary>
+    public void ScheduleSleep(TimeSpan delay)
+    {
+        _scheduledSleepAt = DateTime.Now + delay;
+        StateChanged?.Invoke();
+    }
+
+    public void CancelScheduledSleep()
+    {
+        _scheduledSleepAt = null;
+        StateChanged?.Invoke();
+    }
+
+    /// <summary>把两个定时器一起取消（托盘菜单里「取消定时」用）。</summary>
+    public void CancelAllScheduled()
+    {
+        _scheduledOffAt = null;
+        _scheduledSleepAt = null;
         StateChanged?.Invoke();
     }
 
@@ -483,6 +513,14 @@ internal sealed class MonitorController : IDisposable
         {
             _scheduledOffAt = null;
             SleepNow(SleepTrigger.Scheduled);
+        }
+
+        // 「N 分钟后睡眠」到点。
+        // 排在关屏之后：两者同时到点时，先关屏再睡，观感上不会闪。
+        if (_scheduledSleepAt is DateTime sleepAt && DateTime.Now >= sleepAt)
+        {
+            _scheduledSleepAt = null;
+            SystemSleep();
         }
 
         // 空闲自动关屏
