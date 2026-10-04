@@ -62,6 +62,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _jiggle = new() { Text = "唤醒时轻微抖动鼠标 1 像素（兼容不响应唤醒指令的驱动）", AutoSize = true };
     private readonly CheckBox _overlay = new() { Text = "关屏失败时改用全屏黑窗遮盖兜底", AutoSize = true };
     private readonly CheckBox _autoStart = new() { Text = "开机自动启动", AutoSize = true };
+    private readonly CheckBox _suppressWake = new() { Text = "抑制伪唤醒（屏幕被无效输入点亮时自动关回去）", AutoSize = true };
 
     /// <param name="initialTab">打开时选中哪个标签页（按标题匹配），null 表示第一个。</param>
     public SettingsForm(MonitorController controller, string? initialTab = null)
@@ -285,6 +286,20 @@ internal sealed class SettingsForm : Form
         Row(t, "空闲多少分钟后关屏", _idleMinutes);
         Row(t, "解锁后的静默期（秒）", _graceSeconds);
         Row(t, "电源策略", _powerPolicy);
+
+        Header(t, "伪唤醒抑制");
+        Span(t, _suppressWake);
+        Span(t, new Label
+        {
+            Text = "有些无线鼠标每隔几分钟会切换一次节能模式，期间发出一条「零位移」报告。\n"
+                 + "Windows 把它当成用户回来了，于是把刚关掉的屏幕又点亮 —— 屏幕就这样反复自己亮。\n"
+                 + "打开后本程序会识别这种无效输入，把屏幕重新关回去。\n"
+                 + "只有真实的鼠标移动、按键或键盘操作才会打断它；连续抑制 8 次后会自动放弃。\n"
+                 + "先试设备管理器和鼠标驱动的省电设置，那些才是根治；这一项是兜底。",
+            AutoSize = true,
+            MaximumSize = new Size(540, 0),
+            ForeColor = SystemColors.GrayText,
+        });
 
         return new TabPage("自动关屏") { Controls = { t } };
     }
@@ -526,6 +541,7 @@ internal sealed class SettingsForm : Form
         _countdownSeconds.Value = Clamp(_draft.CountdownSeconds, _countdownSeconds);
         _jiggle.Checked = _draft.JiggleOnWake;
         _overlay.Checked = _draft.OverlayFallback;
+        _suppressWake.Checked = _draft.SuppressSpuriousWake;
         _autoStart.Checked = AutostartService.IsEnabled();
 
         RefreshStateLabels();
@@ -621,6 +637,7 @@ internal sealed class SettingsForm : Form
         _draft.CountdownSeconds = (int)_countdownSeconds.Value;
         _draft.JiggleOnWake = _jiggle.Checked;
         _draft.OverlayFallback = _overlay.Checked;
+        _draft.SuppressSpuriousWake = _suppressWake.Checked;
 
         // 开机自启直接落到注册表
         if (_autoStart.Checked != AutostartService.IsEnabled())

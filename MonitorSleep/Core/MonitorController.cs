@@ -44,6 +44,15 @@ internal sealed class MonitorController : IDisposable
     private bool _systemSleepPending;
     private bool _disposed;
 
+    // ── 伪唤醒抑制 ──
+    private RawInputWindow? _rawInput;
+    private bool _displayWasOff;
+    private uint _displayOffDetectedTick;
+    private int _resuppressCount;
+
+    /// <summary>连续抑制次数上限，避免和用户"打架"打成死循环。</summary>
+    private const int MaxResuppress = 8;
+
     public MonitorController(SettingsStore store)
     {
         _store = store;
@@ -52,7 +61,15 @@ internal sealed class MonitorController : IDisposable
 
         _tickTimer = new System.Windows.Forms.Timer { Interval = 1000 };
         _tickTimer.Tick += (_, _) => OnTick();
+
+        // 后台窗口：收 Raw Input（区分真实输入与零位移伪报告）和显示器开关通知。
+        // 起不来也不影响其它功能，只是伪唤醒抑制不可用。
+        try { _rawInput = new RawInputWindow(); }
+        catch { _rawInput = null; }
     }
+
+    /// <summary>伪唤醒抑制当前是否真的可用（供诊断模式显示）。</summary>
+    public string SuppressWakeStatus => _rawInput?.StatusText ?? "不可用：后台窗口创建失败";
 
     // ── 由 UI 层注入的回调 ──
 
@@ -139,6 +156,9 @@ internal sealed class MonitorController : IDisposable
 
         _tickTimer.Stop();
         _tickTimer.Dispose();
+
+        _rawInput?.Dispose();
+        _rawInput = null;
 
         // 释放"保持系统唤醒"
         try { NativeMethods.ApplyExecutionState(NativeMethods.ExecutionState.Continuous); }
@@ -438,6 +458,7 @@ internal sealed class MonitorController : IDisposable
     private void OnTick()
     {
         TrackDisplayState();
+        TrackSpuriousWake();
 
         // 有关屏请求在排队时用更快的节拍轮询，关起来才跟手
         _tickTimer.Interval = _quietWaitSince is not null ? 100 : 1000;
@@ -492,6 +513,122 @@ internal sealed class MonitorController : IDisposable
     }
 
     private void EndDisplayOffSession() => _displayOffTick = null;
+
+    private bool _inferredDisplayOff;
+
+    /// <summary>
+    /// 屏幕当前是不是关着的。
+    ///
+    /// 优先用系统通知（精确，事实）。但实测在某些环境下
+    /// RegisterPowerSettingNotification 注册成功却一条通知都收不到
+    /// （两条 GUID 都试过，0 条），所以必须有退路。
+    /// </summary>
+    private bool CurrentDisplayOff()
+    {
+        if (_rawInput is null) return false;
+
+        // 收到过通知 → 以通知为准
+        if (_rawInput.DisplayStateChanges > 0) return _rawInput.IsDisplayOff;
+
+        return InferDisplayOffFromIdle();
+    }
+
+    /// <summary>
+    /// 退路：靠空闲时间推断屏幕状态。
+    ///
+    /// 依据是"空闲时间已经超过系统关屏超时" —— 那屏幕正常就该关了。
+    /// 空闲一旦归零，说明刚从关闭状态被唤醒。
+    ///
+    /// 这是推断不是事实，所以取交流 / 电池两个超时里较小的那个（更早触发，
+    /// 宁可多管一次也不要漏掉）。接管模式下系统超时被改成了"从不"，此时返回 false，
+    /// 那种情况由我们自己的 _displayOffTick 负责。
+    /// </summary>
+    private bool InferDisplayOffFromIdle()
+    {
+        TimeSpan? timeout = SystemVideoTimeout();
+        if (timeout is not TimeSpan limit) return false;
+
+        TimeSpan idle = NativeMethods.GetIdleTime();
+
+        if (idle >= limit) { _inferredDisplayOff = true; return true; }
+        if (idle < TimeSpan.FromSeconds(2)) { _inferredDisplayOff = false; return false; }
+
+        return _inferredDisplayOff;   // 中间地带维持上一次判断，避免抖动
+    }
+
+    private TimeSpan? SystemVideoTimeout() => SystemVideoTimeoutFor(_settings);
+
+    /// <summary>
+    /// 从配置里保存的系统超时原值推算当前关屏超时。
+    /// 接管模式下系统超时被改成了"从不"，此时返回 null。
+    /// </summary>
+    public static TimeSpan? SystemVideoTimeoutFor(AppSettings settings)
+    {
+        if (settings.TakeOverSystemTimeout) return null;
+
+        uint ac = settings.SavedAcVideoIdle;
+        uint dc = settings.SavedDcVideoIdle;
+        if (ac == 0 && dc == 0) return null;
+
+        uint seconds = ac == 0 ? dc : dc == 0 ? ac : Math.Min(ac, dc);
+        return TimeSpan.FromSeconds(Math.Max(30u, seconds));
+    }
+
+    /// <summary>
+    /// 伪唤醒抑制。
+    ///
+    /// 思路：显示器从"关"变回"开"的那一刻，回头看这段时间里有没有发生过**真实输入**。
+    ///   没有 → 判定为伪唤醒（典型来源：无线鼠标每隔几分钟切换一次节能模式，
+    ///          送来一条零位移 HID 报告，Windows 就当作用户回来了），把屏幕关回去。
+    ///   有   → 是真人回来了，什么都不做。
+    ///
+    /// 这里必须用 Raw Input 而不是"距上次输入的时间"：后者只知道"有输入"，
+    /// 分不出那是用户动手还是设备自己发的报告。
+    /// </summary>
+    private void TrackSpuriousWake()
+    {
+        if (_rawInput is null) return;
+
+        // 兜底判据：光标动过就算真实输入（不依赖 Raw Input）
+        _rawInput.PollCursorFallback();
+
+        if (!_settings.SuppressSpuriousWake)
+        {
+            _displayWasOff = CurrentDisplayOff();
+            return;
+        }
+
+        bool displayOff = CurrentDisplayOff();
+
+        if (displayOff)
+        {
+            if (!_displayWasOff)
+                _displayOffDetectedTick = unchecked((uint)Environment.TickCount);
+
+            // 注意：这里**不能**清零 _resuppressCount。
+            // 抑制成功后屏幕会再关一次、又走一遍这条分支；
+            // 若在此清零，上限就永远触发不了，会变成和用户无休止地抢屏幕。
+            _displayWasOff = true;
+            return;
+        }
+
+        if (!_displayWasOff) return;
+        _displayWasOff = false;
+
+        bool genuine = unchecked((int)(_rawInput.LastGenuineInputTick - _displayOffDetectedTick)) > 0;
+        if (genuine)
+        {
+            _resuppressCount = 0;   // 用户回来了，计数归零
+            return;
+        }
+
+        if (_resuppressCount >= MaxResuppress) return;
+        _resuppressCount++;
+
+        LastBlockReason = "已抑制一次伪唤醒";
+        NativeMethods.BroadcastMonitorPower(NativeMethods.MONITOR_OFF);
+        StateChanged?.Invoke();
+    }
 
     /// <summary>
     /// 仅在"屏幕已关闭 + 用户开启该选项"时阻止系统睡眠，

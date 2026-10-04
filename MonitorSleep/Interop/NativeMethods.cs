@@ -523,4 +523,156 @@ internal static class NativeMethods
             if (token != IntPtr.Zero) CloseHandle(token);
         }
     }
+
+    // ───────────────────── Raw Input：区分"真人操作"与"伪唤醒" ─────────────────────
+
+    public const int WM_INPUT = 0x00FF;
+    public const int WM_POWERBROADCAST = 0x0218;
+    public const int PBT_POWERSETTINGCHANGE = 0x8015;
+    public const uint DEVICE_NOTIFY_WINDOW_HANDLE = 0;
+
+    /// <summary>显示器开关状态变化时，系统会按这个 GUID 通知我们。</summary>
+    public static readonly Guid GuidConsoleDisplayState = new("6fe69556-704a-47a0-8f24-c28d936fda47");
+
+    /// <summary>
+    /// 较老但更通用的「显示器开 / 关」通知 GUID。
+    ///
+    /// 实测 GUID_CONSOLE_DISPLAY_STATE 在某些环境下一条通知都收不到，
+    /// 所以两条都注册上 —— 哪条先到都算数。
+    /// </summary>
+    public static readonly Guid GuidMonitorPowerOn = new("02731015-4510-4526-99e6-e5a17ebd1aea");
+
+    private const uint RIDEV_INPUTSINK = 0x00000100;
+    private const uint RID_INPUT = 0x10000003;
+    private const uint RIM_TYPEMOUSE = 0;
+    private const uint RIM_TYPEKEYBOARD = 1;
+    private const ushort MOUSE_MOVE_ABSOLUTE = 0x01;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RAWINPUTDEVICE
+    {
+        public ushort UsagePage;
+        public ushort Usage;
+        public uint Flags;
+        public IntPtr Target;
+    }
+
+    /// <summary>
+    /// 一条 Raw Input。
+    ///
+    /// 字段偏移是手写固定的，因为这是 x64 下的确切布局：
+    /// 头部 = dwType(4) + dwSize(4) + hDevice(8) + wParam(8) = 24 字节，
+    /// 鼠标 / 键盘的联合体从偏移 24 开始。
+    /// （x86 下头部只有 16 字节，所以本类型只在 64 位进程里使用。）
+    /// </summary>
+    [StructLayout(LayoutKind.Explicit)]
+    public struct RAWINPUT
+    {
+        [FieldOffset(0)] public uint Type;
+        [FieldOffset(4)] public uint Size;
+        [FieldOffset(8)] public IntPtr Device;
+        [FieldOffset(16)] public IntPtr WParam;
+
+        // ── 鼠标（联合体起始于 24） ──
+        [FieldOffset(24)] public ushort MouseFlags;
+        [FieldOffset(28)] public ushort MouseButtonFlags;
+        [FieldOffset(36)] public int MouseLastX;
+        [FieldOffset(40)] public int MouseLastY;
+
+        // ── 键盘 ──
+        [FieldOffset(30)] public ushort KeyboardVKey;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool RegisterRawInputDevices(
+        [In] RAWINPUTDEVICE[] devices, uint numDevices, uint size);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetRawInputData(
+        IntPtr rawInput, uint command, IntPtr data, ref uint size, uint headerSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr RegisterPowerSettingNotification(
+        IntPtr recipient, ref Guid powerSettingGuid, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnregisterPowerSettingNotification(IntPtr handle);
+
+    /// <summary>本进程是不是 64 位 —— RAWINPUT 的字段偏移只对 64 位成立。</summary>
+    public static bool Is64BitProcess => IntPtr.Size == 8;
+
+    /// <summary>让指定窗口即使在后台也能收到鼠标 / 键盘的原始输入。</summary>
+    public static bool RegisterRawInput(IntPtr hwnd)
+    {
+        if (!Is64BitProcess) return false;
+
+        var devices = new[]
+        {
+            new RAWINPUTDEVICE { UsagePage = 0x01, Usage = 0x02, Flags = RIDEV_INPUTSINK, Target = hwnd },  // 鼠标
+            new RAWINPUTDEVICE { UsagePage = 0x01, Usage = 0x06, Flags = RIDEV_INPUTSINK, Target = hwnd },  // 键盘
+        };
+        return RegisterRawInputDevices(devices, (uint)devices.Length, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
+    }
+
+    public static IntPtr RegisterDisplayStateNotification(IntPtr hwnd, Guid powerSetting)
+    {
+        Guid guid = powerSetting;   // 按 ref 传需要可写变量
+        return RegisterPowerSettingNotification(hwnd, ref guid, DEVICE_NOTIFY_WINDOW_HANDLE);
+    }
+
+    public static void UnregisterDisplayStateNotification(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero) return;
+        try { UnregisterPowerSettingNotification(handle); } catch { /* 忽略 */ }
+    }
+
+    /// <summary>读出 lParam 指向的那条 Raw Input；失败返回 null。</summary>
+    public static RAWINPUT? ReadRawInput(IntPtr lParam)
+    {
+        const uint headerSize = 24;   // x64 的 RAWINPUTHEADER 大小
+        uint size = 0;
+
+        // 先问需要多大缓冲区
+        if (GetRawInputData(lParam, RID_INPUT, IntPtr.Zero, ref size, headerSize) != 0) return null;
+        if (size == 0 || size > 4096) return null;
+
+        IntPtr buffer = Marshal.AllocHGlobal((int)size);
+        try
+        {
+            if (GetRawInputData(lParam, RID_INPUT, buffer, ref size, headerSize) != size) return null;
+            return Marshal.PtrToStructure<RAWINPUT>(buffer);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    /// <summary>
+    /// 这条 Raw Input 算不算"真人操作"。
+    ///
+    /// 关键在鼠标：无线鼠标切换节能模式时会送来一条**零位移**报告，
+    /// Windows 因此把显示器点亮，但光标其实一步没动 —— 这种必须判为伪唤醒。
+    /// </summary>
+    public static bool IsGenuineInput(in RAWINPUT input)
+    {
+        if (input.Type == RIM_TYPEMOUSE)
+        {
+            // 绝对坐标设备（数位板、远程桌面）的位移字段其实是坐标，不能按增量判断
+            if ((input.MouseFlags & MOUSE_MOVE_ABSOLUTE) != 0) return true;
+
+            // 按键、滚轮一律算真实操作
+            if (input.MouseButtonFlags != 0) return true;
+
+            return input.MouseLastX != 0 || input.MouseLastY != 0;
+        }
+
+        if (input.Type == RIM_TYPEKEYBOARD)
+        {
+            // 0xFF 是系统伪键码（用来传递特殊状态），不算真实按键
+            return input.KeyboardVKey != 0xFF;
+        }
+
+        return false;
+    }
 }

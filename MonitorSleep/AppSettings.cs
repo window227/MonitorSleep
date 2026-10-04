@@ -111,6 +111,16 @@ public sealed class AppSettings
     /// <summary>关屏失败时改用全屏黑窗遮盖兜底。</summary>
     public bool OverlayFallback { get; set; } = true;
 
+    /// <summary>
+    /// 伪唤醒抑制：屏幕被"没有真实输入"的事件点亮时，自动把它关回去。
+    ///
+    /// 典型场景：无线鼠标每隔几分钟切换一次节能模式，产生一条零位移报告，
+    /// Windows 把它当成"用户回来了"，于是把刚关掉的屏幕又点亮。
+    ///
+    /// 默认关闭 —— 它会主动关屏，属于比较强势的行为，需要用户明确同意。
+    /// </summary>
+    public bool SuppressSpuriousWake { get; set; }
+
     // ── 系统集成 ──
     public bool AutoStart { get; set; }
     /// <summary>是否已经给用户看过"托盘图标可能被折叠"的首次运行提示。</summary>
