@@ -26,3 +26,7 @@ debug.log
 *.user
 .vs/
 .idea/
+
+# 我在调试时抓的临时截图（都以点开头）
+.*.png
+.*.log

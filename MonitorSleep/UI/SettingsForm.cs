@@ -65,6 +65,16 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _suppressWake = new() { Text = "抑制伪唤醒（屏幕被无效输入点亮时自动关回去）", AutoSize = true };
     private readonly CheckBox _resleepWake = new() { Text = "电脑被无效输入唤醒时，让它继续睡", AutoSize = true };
 
+    // ── 定时关屏 / 定时睡眠 ──
+    private static readonly int[] TimerMinutes = { 5, 15, 30, 45, 60, 90, 120 };
+
+    private readonly ComboBox _offTimerDelay = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
+    private readonly ComboBox _sleepTimerDelay = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
+    private readonly Button _offTimerSet = new() { Text = "排定", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
+    private readonly Button _sleepTimerSet = new() { Text = "排定", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
+    private readonly Button _timerCancel = new() { Text = "取消定时", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
+    private readonly Label _timerStatus = new() { AutoSize = true, ForeColor = SystemColors.GrayText };
+
     /// <param name="initialTab">打开时选中哪个标签页（按标题匹配），null 表示第一个。</param>
     public SettingsForm(MonitorController controller, string? initialTab = null)
     {
@@ -86,6 +96,17 @@ internal sealed class SettingsForm : Form
             "只在电池供电时自动关屏",
             "只在插电时自动关屏",
         });
+
+        foreach (int minutes in TimerMinutes)
+        {
+            _offTimerDelay.Items.Add($"{minutes} 分钟后");
+            _sleepTimerDelay.Items.Add($"{minutes} 分钟后");
+        }
+        _offTimerDelay.SelectedIndex = 0;
+        _sleepTimerDelay.SelectedIndex = 0;
+
+        // 定时是立即生效的动作（和「立即关屏」一样），不走「确定 / 应用」
+        _timerCancel.Click += (_, _) => _controller.CancelAllScheduled();
 
         _tabs.TabPages.Add(BuildBasicPage());
         _tabs.TabPages.Add(BuildAutoOffPage());    // 空闲自动关屏从第一页挪走
@@ -255,6 +276,14 @@ internal sealed class SettingsForm : Form
         Header(t, "关屏前倒计时");
         Span(t, _showCountdown);
         Row(t, "倒计时秒数", _countdownSeconds);
+
+        // 定时关屏 / 定时睡眠 —— 和托盘菜单里那两项是同一套逻辑，
+        // 放在这里是因为托盘图标可能被 Win11 收进「^」折叠区，不好找。
+        Header(t, "定时");
+        Row(t, "关屏", BuildTimerRow(_offTimerDelay, _offTimerSet, _controller.ScheduleOff));
+        Row(t, "睡眠", BuildTimerRow(_sleepTimerDelay, _sleepTimerSet, _controller.ScheduleSleep));
+        Span(t, _timerStatus);
+        Span(t, _timerCancel);
 
         Header(t, "全局热键");
         Span(t, _hotKeysEnabled);
@@ -585,6 +614,46 @@ internal sealed class SettingsForm : Form
     {
         _displayState.Text = _controller.DisplayStateText;
         _autoOffState.Text = _controller.AutoOffStatusText;
+        RefreshTimerStatus();
+    }
+
+    /// <summary>刷新「定时」那一块的排定状态与取消按钮可用性。</summary>
+    private void RefreshTimerStatus()
+    {
+        var parts = new List<string>(2);
+
+        if (_controller.ScheduledOffAt is DateTime offAt)
+            parts.Add($"{Math.Max(0, (int)Math.Ceiling((offAt - DateTime.Now).TotalMinutes))} 分钟后关屏");
+
+        if (_controller.ScheduledSleepAt is DateTime sleepAt)
+            parts.Add($"{Math.Max(0, (int)Math.Ceiling((sleepAt - DateTime.Now).TotalMinutes))} 分钟后睡眠");
+
+        _timerStatus.Text = parts.Count > 0
+            ? "已排定：" + string.Join(" · ", parts)
+            : "当前没有排定的定时。";
+
+        _timerCancel.Enabled = parts.Count > 0;
+    }
+
+    /// <summary>「几分钟后」下拉框 + 「排定」按钮 组成的一行。</summary>
+    private static Control BuildTimerRow(ComboBox delay, Button set, Action<TimeSpan> schedule)
+    {
+        set.Click += (_, _) =>
+        {
+            int index = Math.Clamp(delay.SelectedIndex, 0, TimerMinutes.Length - 1);
+            schedule(TimeSpan.FromMinutes(TimerMinutes[index]));
+        };
+
+        var row = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = new Padding(3, 2, 3, 2),
+        };
+        row.Controls.Add(delay);
+        row.Controls.Add(set);
+        return row;
     }
 
     private void RefreshPowerStatus()

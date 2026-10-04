@@ -118,13 +118,13 @@ internal sealed class TrayContext : ApplicationContext
 
         if (_controller.ScheduledOffAt is DateTime at)
         {
-            int mins = Math.Max(0, (int)(at - DateTime.Now).TotalMinutes);
+            int mins = Math.Max(0, (int)Math.Ceiling((at - DateTime.Now).TotalMinutes));
             _menu.Items.Add(new ToolStripMenuItem($"「{mins} 分钟后关屏」已排定") { Enabled = false });
         }
 
         if (_controller.ScheduledSleepAt is DateTime sleepAt)
         {
-            int mins = Math.Max(0, (int)(sleepAt - DateTime.Now).TotalMinutes);
+            int mins = Math.Max(0, (int)Math.Ceiling((sleepAt - DateTime.Now).TotalMinutes));
             _menu.Items.Add(new ToolStripMenuItem($"「{mins} 分钟后睡眠」已排定") { Enabled = false });
         }
 

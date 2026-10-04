@@ -122,9 +122,9 @@ internal sealed class MonitorController : IDisposable
         {
             var timers = new List<string>(2);
             if (_scheduledOffAt is DateTime offAt)
-                timers.Add($"{Math.Max(0, (int)(offAt - DateTime.Now).TotalMinutes)} 分钟后关屏");
+                timers.Add($"{Math.Max(0, (int)Math.Ceiling((offAt - DateTime.Now).TotalMinutes))} 分钟后关屏");
             if (_scheduledSleepAt is DateTime sleepAt)
-                timers.Add($"{Math.Max(0, (int)(sleepAt - DateTime.Now).TotalMinutes)} 分钟后睡眠");
+                timers.Add($"{Math.Max(0, (int)Math.Ceiling((sleepAt - DateTime.Now).TotalMinutes))} 分钟后睡眠");
             if (timers.Count > 0)
                 return string.Join(" · ", timers);
 
