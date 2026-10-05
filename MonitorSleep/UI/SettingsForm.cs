@@ -549,7 +549,10 @@ internal sealed class SettingsForm : Form
         Header(t, "显示器睡眠助手");
         Span(t, new Label
         {
-            Text = $"版本 {typeof(SettingsForm).Assembly.GetName().Version?.ToString(3) ?? "0.1.0"}",
+            // 版本号从程序集读，跟着 csproj 的 <Version> 走。
+            // 兜底值刻意不写具体版本 —— 否则每次升版本它都会变成一处过期的硬编码，
+            // 让人以为「关于页没改」。
+            Text = $"版本 {typeof(SettingsForm).Assembly.GetName().Version?.ToString(3) ?? "未知"}",
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
         });
