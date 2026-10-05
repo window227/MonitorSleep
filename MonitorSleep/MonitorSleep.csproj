@@ -14,9 +14,9 @@
     <!-- 程序图标：资源管理器、任务栏、快捷方式都用它 -->
     <ApplicationIcon>app.ico</ApplicationIcon>
 
-    <Version>0.1.0</Version>
-    <AssemblyVersion>0.1.0.0</AssemblyVersion>
-    <FileVersion>0.1.0.0</FileVersion>
+    <Version>0.2.0</Version>
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
+    <FileVersion>0.2.0.0</FileVersion>
     <Product>显示器睡眠助手</Product>
     <AssemblyTitle>显示器睡眠助手</AssemblyTitle>
     <Description>按需关闭显示器省电，并在不该关屏时保持屏幕常亮。</Description>

@@ -7,6 +7,10 @@
 
 ## [未发布]
 
+（暂无）
+
+## [0.2.0] - 2026-10-04
+
 ### 界面
 
 - **「基本」页顶部加品牌区** —— 48px 程序图标 + 名称 + 当前状态（屏幕开启 / 已关闭）。
@@ -31,7 +35,7 @@
   随之移除的还有已无调用点的 `MonitorController.WakeNow()`，以及只在它内部使用的
   `JiggleOnWake` 设置（「行为」页那个「唤醒时轻微抖动鼠标」复选框）——
   留着会变成一个永远无效的僵尸开关。
-### 新增（尚未发布）
+### 新增
 
 - **定时睡眠** —— 托盘菜单「定时睡眠」，以及「设置 → 基本 → 定时」：5/15/30/45/60/90/120 分钟后让电脑睡眠，可取消。
   到点后走与手动触发相同的倒计时流程。与原有的「定时关屏」对称；两个定时器可以同时排定，
@@ -109,5 +113,6 @@
 
 - GPL-3.0，全文见 [LICENSE](LICENSE)。
 
-[未发布]: https://github.com/window227/MonitorSleep/compare/v0.1.0...HEAD
+[未发布]: https://github.com/window227/MonitorSleep/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/window227/MonitorSleep/releases/tag/v0.2.0
 [0.1.0]: https://github.com/window227/MonitorSleep/releases/tag/v0.1.0
