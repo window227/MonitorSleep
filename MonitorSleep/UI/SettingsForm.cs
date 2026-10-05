@@ -76,6 +76,10 @@ internal sealed class SettingsForm : Form
     private readonly Button _timerCancel = new() { Text = "取消定时", AutoSize = true, Padding = new Padding(10, 2, 10, 2) };
     private readonly Label _timerStatus = new() { AutoSize = true, ForeColor = SystemColors.GrayText };
 
+    // 顶部品牌区的图标（跟随屏幕开 / 关切换，和托盘图标同一套画法）
+    private PictureBox? _brandIcon;
+    private bool _brandIconShowsOff;
+
     /// <param name="initialTab">打开时选中哪个标签页（按标题匹配），null 表示第一个。</param>
     public SettingsForm(MonitorController controller, string? initialTab = null)
     {
@@ -276,8 +280,9 @@ internal sealed class SettingsForm : Form
     {
         var t = NewTable();
 
+        Span(t, BuildBrandHeader());
+
         Header(t, "快速操作");
-        Span(t, _displayState);
 
         // 不放"唤醒屏幕"按钮：动一下键鼠屏幕就亮了，单独一个按钮没有意义
         var sleepNow = new Button { Text = "立即关屏", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
@@ -320,6 +325,52 @@ internal sealed class SettingsForm : Form
     /// 「自动关屏」页 —— 从第一页挪过来的。
     /// 空闲时长和倒计时属于"调好了就很少动"的参数，占着首页反而挤掉了常用操作。
     /// </summary>
+    /// <summary>
+    /// 「基本」页顶部的品牌区：程序图标 + 名称 + 当前状态。
+    ///
+    /// 图标复用托盘那套绘制代码（TrayIconFactory），所以这里和托盘长得一模一样，
+    /// 而且会跟着屏幕开关变色。
+    /// </summary>
+    private Control BuildBrandHeader()
+    {
+        _brandIconShowsOff = _controller.IsDisplayOff;
+
+        _brandIcon = new PictureBox
+        {
+            Image = TrayIconFactory.Draw(48, _brandIconShowsOff),
+            SizeMode = PictureBoxSizeMode.AutoSize,
+            Margin = new Padding(0, 2, 14, 0),
+        };
+
+        var text = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = new Padding(0, 4, 0, 0),
+        };
+        text.Controls.Add(new Label
+        {
+            Text = "显示器睡眠助手",
+            AutoSize = true,
+            Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold),
+            Margin = new Padding(0, 0, 0, 1),
+        });
+        text.Controls.Add(_displayState);   // 「屏幕开启 / 屏幕已关闭」
+
+        var row = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = new Padding(3, 2, 3, 8),
+        };
+        row.Controls.Add(_brandIcon);
+        row.Controls.Add(text);
+        return row;
+    }
+
     private TabPage BuildAutoOffPage()
     {
         var t = NewTable();
@@ -650,7 +701,22 @@ internal sealed class SettingsForm : Form
     {
         _displayState.Text = _controller.DisplayStateText;
         _autoOffState.Text = _controller.AutoOffStatusText;
+        RefreshBrandIcon();
         RefreshTimerStatus();
+    }
+
+    /// <summary>屏幕开关状态变了就重画顶部图标 —— 只在切换时重画，不是每秒都来一次。</summary>
+    private void RefreshBrandIcon()
+    {
+        if (_brandIcon is null) return;
+
+        bool off = _controller.IsDisplayOff;
+        if (off == _brandIconShowsOff) return;
+
+        _brandIconShowsOff = off;
+        var previous = _brandIcon.Image;
+        _brandIcon.Image = TrayIconFactory.Draw(48, off);
+        previous?.Dispose();
     }
 
     /// <summary>刷新「定时」那一块的排定状态与取消按钮可用性。</summary>
