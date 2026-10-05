@@ -8,8 +8,21 @@ namespace MonitorSleep;
 
 internal static class Program
 {
-    private const string MutexName = @"Local\MonitorSleep.SingleInstance";
-    private const string ShowSettingsEventName = @"Local\MonitorSleep.ShowSettings";
+    private const string MutexNameBase = @"Local\MonitorSleep.SingleInstance";
+    private const string ShowSettingsEventBase = @"Local\MonitorSleep.ShowSettings";
+
+    /// <summary>
+    /// 实例标识后缀，默认空 —— 也就是正常用法：全局只允许跑一份。
+    ///
+    /// 设了环境变量 MONITORSLEEP_INSTANCE 就会加到互斥体名字后面，
+    /// 于是第二份能和正在运行的那份并存。调试时很有用：
+    /// 否则新构建一启动就撞上单实例分支，直接弹框退出，连窗口都看不到。
+    /// </summary>
+    private static string InstanceSuffix =>
+        Environment.GetEnvironmentVariable("MONITORSLEEP_INSTANCE") ?? string.Empty;
+
+    private static string MutexName => MutexNameBase + InstanceSuffix;
+    private static string ShowSettingsEventName => ShowSettingsEventBase + InstanceSuffix;
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(int dwProcessId);
