@@ -69,9 +69,11 @@ internal sealed class SettingsForm : Form
 
     private readonly ComboBox _offTimerDelay = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
     private readonly ComboBox _sleepTimerDelay = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
-    private readonly Button _offTimerSet = new() { Text = "排定", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
-    private readonly Button _sleepTimerSet = new() { Text = "排定", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
-    private readonly Button _timerCancel = new() { Text = "取消定时", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
+    // 垂直内边距比普通按钮小 1px：下拉框的高度由字体决定（约 27px），
+    // 用 3px 内边距会让「排定」比它高 4px，同一行里顶边就错开了
+    private readonly Button _offTimerSet = new() { Text = "排定", AutoSize = true, Padding = new Padding(10, 2, 10, 2) };
+    private readonly Button _sleepTimerSet = new() { Text = "排定", AutoSize = true, Padding = new Padding(10, 2, 10, 2) };
+    private readonly Button _timerCancel = new() { Text = "取消定时", AutoSize = true, Padding = new Padding(10, 2, 10, 2) };
     private readonly Label _timerStatus = new() { AutoSize = true, ForeColor = SystemColors.GrayText };
 
     /// <param name="initialTab">打开时选中哪个标签页（按标题匹配），null 表示第一个。</param>
@@ -187,8 +189,28 @@ internal sealed class SettingsForm : Form
         return t;
     }
 
+    /// <summary>分组之间的一条细线，让各组的界限一眼能看出来。</summary>
+    private static void Separator(TableLayoutPanel t)
+    {
+        t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        int r = t.RowStyles.Count - 1;
+
+        var line = new Panel
+        {
+            Height = 1,
+            BackColor = Color.FromArgb(212, 212, 212),
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
+            Margin = new Padding(3, 16, 3, 0),
+        };
+        t.Controls.Add(line, 0, r);
+        t.SetColumnSpan(line, 2);
+    }
+
     private static void Header(TableLayoutPanel t, string text)
     {
+        // 第一组之前不画线（页面顶部不需要），之后每组都先来一条
+        if (t.RowStyles.Count > 0) Separator(t);
+
         t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         int r = t.RowStyles.Count - 1;
         var lbl = new Label
@@ -196,7 +218,7 @@ internal sealed class SettingsForm : Form
             Text = text,
             AutoSize = true,
             Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
-            Margin = new Padding(3, 12, 3, 6),
+            Margin = new Padding(3, 6, 3, 6),   // 上方的留白交给分隔线提供
         };
         t.Controls.Add(lbl, 0, r);
         t.SetColumnSpan(lbl, 2);
@@ -279,10 +301,13 @@ internal sealed class SettingsForm : Form
         // 定时关屏 / 定时睡眠 —— 和托盘菜单里那两项是同一套逻辑，
         // 放在这里是因为托盘图标可能被 Win11 收进「^」折叠区，不好找。
         Header(t, "定时");
-        Row(t, "关屏", BuildTimerRow(_offTimerDelay, _offTimerSet, _controller.ScheduleOff));
-        Row(t, "睡眠", BuildTimerRow(_sleepTimerDelay, _sleepTimerSet, _controller.ScheduleSleep));
+        _offTimerSet.Click += (_, _) => ScheduleDelay(_offTimerDelay, _controller.ScheduleOff);
+        _sleepTimerSet.Click += (_, _) => ScheduleDelay(_sleepTimerDelay, _controller.ScheduleSleep);
+
+        Row(t, "关屏", InlineRow(_offTimerDelay, _offTimerSet));
+        Row(t, "睡眠", InlineRow(_sleepTimerDelay, _sleepTimerSet));
+        Row(t, "", InlineRow(_timerCancel));   // 放进值列，和上面的下拉框左对齐；不要拉满整行
         Span(t, _timerStatus);
-        Span(t, _timerCancel);
 
         Header(t, "全局热键");
         Span(t, _hotKeysEnabled);
@@ -632,15 +657,14 @@ internal sealed class SettingsForm : Form
         _timerCancel.Enabled = parts.Count > 0;
     }
 
-    /// <summary>「几分钟后」下拉框 + 「排定」按钮 组成的一行。</summary>
-    private static Control BuildTimerRow(ComboBox delay, Button set, Action<TimeSpan> schedule)
+    /// <summary>
+    /// 把若干控件横排成一行，保持各自的原生尺寸（不会被拉伸）。
+    ///
+    /// 关键是清掉控件自带的 3px 外边距：否则整行会比同列的单控件右移几像素，
+    /// 和上一行的输入框对不齐，看着就是"错乱"。
+    /// </summary>
+    private static FlowLayoutPanel InlineRow(params Control[] items)
     {
-        set.Click += (_, _) =>
-        {
-            int index = Math.Clamp(delay.SelectedIndex, 0, TimerMinutes.Length - 1);
-            schedule(TimeSpan.FromMinutes(TimerMinutes[index]));
-        };
-
         var row = new FlowLayoutPanel
         {
             AutoSize = true,
@@ -648,9 +672,19 @@ internal sealed class SettingsForm : Form
             WrapContents = false,
             Margin = new Padding(3, 2, 3, 2),
         };
-        row.Controls.Add(delay);
-        row.Controls.Add(set);
+
+        for (int i = 0; i < items.Length; i++)
+        {
+            items[i].Margin = new Padding(0, 0, i == items.Length - 1 ? 0 : 8, 0);
+            row.Controls.Add(items[i]);
+        }
         return row;
+    }
+
+    private static void ScheduleDelay(ComboBox delay, Action<TimeSpan> schedule)
+    {
+        int index = Math.Clamp(delay.SelectedIndex, 0, TimerMinutes.Length - 1);
+        schedule(TimeSpan.FromMinutes(TimerMinutes[index]));
     }
 
     private void RefreshPowerStatus()
