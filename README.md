@@ -7,7 +7,9 @@ Windows 自带的「N 分钟后关闭显示」是个死板计时器 —— 看�
 
 不需要管理员权限，不依赖任何第三方库。
 
-![设置界面](docs/screenshot.png)
+<p align="center">
+  <img src="docs/screenshot.png" width="380" alt="设置界面">
+</p>
 
 ## 能做什么
 
