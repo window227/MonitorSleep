@@ -318,6 +318,10 @@ internal sealed class SettingsForm : Form
             ForeColor = SystemColors.GrayText,
         });
 
+        // 页面底部署名：昵称 + 可点邮箱
+        Separator(t);
+        Span(t, BuildSignature());
+
         return new TabPage("基本") { Controls = { t } };
     }
 
@@ -342,37 +346,7 @@ internal sealed class SettingsForm : Form
             Margin = new Padding(0, 2, 14, 0),
         };
 
-        // 标题行：程序名 + 联系方式并排，这样不额外占高度（第一页别太长）
-        var title = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = false,
-            Margin = new Padding(0, 0, 0, 1),
-        };
-        title.Controls.Add(new Label
-        {
-            Text = "显示器睡眠助手",
-            AutoSize = true,
-            Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold),
-            Margin = new Padding(0, 0, 18, 0),
-        });
-        title.Controls.Add(new Label
-        {
-            Text = "见义勇为的猫",
-            AutoSize = true,
-            ForeColor = SystemColors.GrayText,
-            Margin = new Padding(0, 7, 6, 0),
-        });
-        var mail = new LinkLabel
-        {
-            Text = "34219585@qq.com",
-            AutoSize = true,
-            Margin = new Padding(0, 7, 0, 0),
-        };
-        mail.LinkClicked += (_, _) => OpenMailTo(mail.Text);
-        title.Controls.Add(mail);
-
+        // 标题行只留程序名：联系方式挪到「基本」页底部当署名，不在这里挤
         var text = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.TopDown,
@@ -381,7 +355,13 @@ internal sealed class SettingsForm : Form
             WrapContents = false,
             Margin = new Padding(0, 4, 0, 0),
         };
-        text.Controls.Add(title);
+        text.Controls.Add(new Label
+        {
+            Text = "显示器睡眠助手",
+            AutoSize = true,
+            Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold),
+            Margin = new Padding(0, 0, 0, 1),
+        });
         text.Controls.Add(_displayState);   // 「屏幕开启 / 屏幕已关闭」
 
         var row = new FlowLayoutPanel
@@ -527,7 +507,41 @@ internal sealed class SettingsForm : Form
         return new TabPage("行为") { Controls = { t } };
     }
 
-    /// <summary>「关于」页 —— 版本、热键、设计说明与联系方式。</summary>
+    /// <summary>
+    /// 「基本」页底部的署名：昵称 + 可点邮箱。
+    ///
+    /// 放在最底部而不是顶部品牌区 —— 顶上那个位置要和程序名抢注意力，
+    /// 三种字号挤一行很乱；挪到底部当签名，两边都清爽。
+    /// </summary>
+    private Control BuildSignature()
+    {
+        var row = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = new Padding(3, 10, 3, 0),
+        };
+        row.Controls.Add(new Label
+        {
+            Text = "见义勇为的猫",
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+            Margin = new Padding(0, 2, 8, 0),
+        });
+
+        var mail = new LinkLabel
+        {
+            Text = "34219585@qq.com",
+            AutoSize = true,
+            Margin = new Padding(0, 2, 0, 0),
+        };
+        mail.LinkClicked += (_, _) => OpenMailTo(mail.Text);
+        row.Controls.Add(mail);
+        return row;
+    }
+
+    /// <summary>「关于」页 —— 版本、热键与设计说明。</summary>
     private TabPage BuildAboutPage()
     {
         var t = NewTable();
@@ -570,31 +584,6 @@ internal sealed class SettingsForm : Form
             AutoSize = true,
             MaximumSize = new Size(540, 0),
         });
-
-        Header(t, "联系方式");
-        // 昵称与邮箱同一行：昵称是普通文字，邮箱是可点的链接
-        var contact = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = false,
-            Margin = new Padding(3, 2, 3, 4),
-        };
-        contact.Controls.Add(new Label
-        {
-            Text = "见义勇为的猫",
-            AutoSize = true,
-            Margin = new Padding(3, 5, 12, 0),
-        });
-        var mail = new LinkLabel
-        {
-            Text = "34219585@qq.com",
-            AutoSize = true,
-            Margin = new Padding(0, 5, 3, 0),
-        };
-        mail.LinkClicked += (_, _) => OpenMailTo(mail.Text);
-        contact.Controls.Add(mail);
-        Span(t, contact);
 
         Header(t, "配置目录");
         Span(t, new Label
