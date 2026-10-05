@@ -342,6 +342,37 @@ internal sealed class SettingsForm : Form
             Margin = new Padding(0, 2, 14, 0),
         };
 
+        // 标题行：程序名 + 联系方式并排，这样不额外占高度（第一页别太长）
+        var title = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = new Padding(0, 0, 0, 1),
+        };
+        title.Controls.Add(new Label
+        {
+            Text = "显示器睡眠助手",
+            AutoSize = true,
+            Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold),
+            Margin = new Padding(0, 0, 18, 0),
+        });
+        title.Controls.Add(new Label
+        {
+            Text = "见义勇为的猫",
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+            Margin = new Padding(0, 7, 6, 0),
+        });
+        var mail = new LinkLabel
+        {
+            Text = "34219585@qq.com",
+            AutoSize = true,
+            Margin = new Padding(0, 7, 0, 0),
+        };
+        mail.LinkClicked += (_, _) => OpenMailTo(mail.Text);
+        title.Controls.Add(mail);
+
         var text = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.TopDown,
@@ -350,13 +381,7 @@ internal sealed class SettingsForm : Form
             WrapContents = false,
             Margin = new Padding(0, 4, 0, 0),
         };
-        text.Controls.Add(new Label
-        {
-            Text = "显示器睡眠助手",
-            AutoSize = true,
-            Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold),
-            Margin = new Padding(0, 0, 0, 1),
-        });
+        text.Controls.Add(title);
         text.Controls.Add(_displayState);   // 「屏幕开启 / 屏幕已关闭」
 
         var row = new FlowLayoutPanel
