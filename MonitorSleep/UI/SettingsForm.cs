@@ -279,20 +279,12 @@ internal sealed class SettingsForm : Form
         Header(t, "快速操作");
         Span(t, _displayState);
 
-        var quick = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            WrapContents = false,
-            Margin = new Padding(3, 2, 3, 4),
-        };
         // 不放"唤醒屏幕"按钮：动一下键鼠屏幕就亮了，单独一个按钮没有意义
-        var sleepNow = new Button { Text = "立即关屏", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
-        var sleepPc = new Button { Text = "电脑睡眠", AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+        var sleepNow = new Button { Text = "立即关屏", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
+        var sleepPc = new Button { Text = "电脑睡眠", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
         sleepNow.Click += (_, _) => _controller.SleepNow(SleepTrigger.Manual);
         sleepPc.Click += (_, _) => _controller.SystemSleep();
-        quick.Controls.Add(sleepNow);
-        quick.Controls.Add(sleepPc);
-        Span(t, quick);
+        Span(t, InlineRow(sleepNow, sleepPc));
 
         Header(t, "关屏前倒计时");
         Span(t, _showCountdown);
@@ -421,7 +413,8 @@ internal sealed class SettingsForm : Form
             MessageBox.Show(this, "已还原系统关屏设置。", "显示器睡眠助手",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
-        Span(t, restoreNow);
+        // 用 InlineRow 包一层：Span 会把这个按钮拉伸到整行宽，和上面的左对齐文字不搭
+        Span(t, InlineRow(restoreNow));
 
         Header(t, "系统睡眠");
         Span(t, _preventSleep);
@@ -530,20 +523,41 @@ internal sealed class SettingsForm : Form
         Header(t, "配置目录");
         Span(t, new Label
         {
-            Text = _controller.Store.DataDirectory,
+            // 用 %APPDATA% 缩写：完整路径在窗口里会从中间断开，很难看
+            Text = ShortenPath(_controller.Store.DataDirectory),
             AutoSize = true,
             MaximumSize = new Size(540, 0),
             ForeColor = SystemColors.GrayText,
         });
         var openFolder = new Button { Text = "打开配置文件夹", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
         openFolder.Click += (_, _) => OpenFolder(_controller.Store.DataDirectory);
-        Span(t, openFolder);
+        Span(t, InlineRow(openFolder));   // 同上：不要拉满整行
 
         return new TabPage("关于") { Controls = { t } };
     }
 
     private static string DescribeBinding(HotKeyBinding binding) =>
         binding.IsValid ? binding.ToString() : "（未绑定）";
+
+    /// <summary>
+    /// 把路径缩写成短形式，省得在界面上从中间折断。
+    ///
+    /// 正常安装时配置在 %APPDATA%\MonitorSleep；
+    /// 受限环境写不进去，会回退到 exe 旁边的 MonitorSleep-data。
+    /// 两种都缩写。
+    /// </summary>
+    private static string ShortenPath(string path)
+    {
+        string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (appData.Length > 0 && path.StartsWith(appData, StringComparison.OrdinalIgnoreCase))
+            return "%APPDATA%" + path.Substring(appData.Length);
+
+        string baseDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+        if (baseDir.Length > 0 && path.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
+            return "程序目录" + path.Substring(baseDir.Length);
+
+        return path;
+    }
 
     private static void OpenMailTo(string address)
     {
