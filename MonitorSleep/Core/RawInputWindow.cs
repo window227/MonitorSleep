@@ -100,16 +100,30 @@ internal sealed class RawInputWindow : Form
     /// </summary>
     public IntPtr LastGenuineDevice { get; private set; }
 
+    /// <summary>
+    /// 最近一条原始输入来自哪个设备 —— **不论真假**。
+    ///
+    /// 和 <see cref="LastGenuineDevice"/> 的区别很关键：伪唤醒恰恰来自那条
+    /// 「零位移」报告，它会被判为非真实输入。只记真实输入的设备，等到写日志时
+    /// 拿到的会是几小时前那次正常移动的旧设备。所以要抓可疑对象，必须记这一条。
+    /// </summary>
+    public IntPtr LastInputDevice { get; private set; }
+
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == NativeMethods.WM_INPUT)
         {
             RawInputMessages++;
             var raw = NativeMethods.ReadRawInput(m.LParam);
-            if (raw is { } input && NativeMethods.IsGenuineInput(in input))
+            if (raw is { } input)
             {
-                LastGenuineInputTick = unchecked((uint)Environment.TickCount);
-                LastGenuineDevice = input.Device;
+                LastInputDevice = input.Device;
+
+                if (NativeMethods.IsGenuineInput(in input))
+                {
+                    LastGenuineInputTick = unchecked((uint)Environment.TickCount);
+                    LastGenuineDevice = input.Device;
+                }
             }
         }
         else if (m.Msg == NativeMethods.WM_POWERBROADCAST)
@@ -220,6 +234,10 @@ internal sealed class RawInputWindow : Form
             ? $"  Raw Input 增强  : ✅ 收到 {RawInputMessages} 条（键盘也能识别）"
             : "  Raw Input 增强  : ⚠ 收不到（受限环境下会被 UIPI 拦掉，但上面那条兜底仍有效）");
 
+        // 单独验一下「设备识别」这条链路 —— 收得到原始输入还不够，
+        // 得能把设备句柄解析成 VID/PID 才算真的可用。
+        lines.Add(DescribeDeviceChain());
+
         // ── 2) 显示状态通知是否真的送达 ──
         NativeMethods.BroadcastMonitorPower(NativeMethods.MONITOR_OFF);
         sw.Restart();
@@ -246,6 +264,19 @@ internal sealed class RawInputWindow : Form
 
         IsDisplayOff = false;   // 自检会打乱状态，复位
         return lines;
+    }
+
+    /// <summary>诊断用：设备识别这条链路通不通。</summary>
+    private string DescribeDeviceChain()
+    {
+        if (LastInputDevice == IntPtr.Zero)
+            return "  设备识别        : ❌ 没有拿到设备句柄 —— 日志里不会出现来源设备";
+
+        string? path = NativeMethods.DescribeRawInputDevice(LastInputDevice);
+        if (path is null)
+            return "  设备识别        : ❌ 句柄拿到了，但解析设备路径失败 —— 日志里不会出现来源设备";
+
+        return $"  设备识别        : ✅ {NativeMethods.DescribeDeviceBriefly(path)}";
     }
 
     protected override void Dispose(bool disposing)

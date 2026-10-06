@@ -602,7 +602,9 @@ internal sealed class MonitorController : IDisposable
     /// </summary>
     private string DescribeWakeDevice()
     {
-        string? path = NativeMethods.DescribeRawInputDevice(_rawInput?.LastGenuineDevice ?? IntPtr.Zero);
+        // 用 LastInputDevice 而不是 LastGenuineDevice：伪唤醒来自零位移报告，
+        // 它不算「真实输入」，用后者会指向几小时前的旧设备。
+        string? path = NativeMethods.DescribeRawInputDevice(_rawInput?.LastInputDevice ?? IntPtr.Zero);
         return path is null ? string.Empty : $" · 来源设备: {NativeMethods.DescribeDeviceBriefly(path)}";
     }
 
