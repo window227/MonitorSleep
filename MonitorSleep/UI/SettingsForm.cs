@@ -61,6 +61,7 @@ internal sealed class SettingsForm : Form
     private readonly NoWheelNumericUpDown _countdownSeconds = new() { Minimum = 1, Maximum = 120, Width = 90 };
     private readonly CheckBox _overlay = new() { Text = "关屏失败时改用全屏黑窗遮盖兜底", AutoSize = true };
     private readonly CheckBox _autoStart = new() { Text = "开机自动启动", AutoSize = true };
+    private readonly CheckBox _enableLog = new() { Text = "记录运行日志", AutoSize = true };
     private readonly CheckBox _suppressWake = new() { Text = "抑制伪唤醒（屏幕被无效输入点亮时自动关回去）", AutoSize = true };
     private readonly CheckBox _resleepWake = new() { Text = "电脑被无效输入唤醒时，让它继续睡", AutoSize = true };
 
@@ -481,6 +482,22 @@ internal sealed class SettingsForm : Form
             ForeColor = SystemColors.GrayText,
         });
 
+        Header(t, "日志");
+        Span(t, _enableLog);
+        Span(t, new Label
+        {
+            Text = "记录关屏、睡眠、唤醒、避让拦截等事件 —— 用来回答「屏幕为什么自己亮了」\n"
+                 + "「该关的时候为什么没关」这类问题。\n"
+                 + "文件上限 512 KB，超过自动轮转，只保留一份历史。日志只写在本地配置目录，不会上传。",
+            AutoSize = true,
+            MaximumSize = new Size(540, 0),
+            ForeColor = SystemColors.GrayText,
+        });
+
+        var openLog = new Button { Text = "打开日志文件", AutoSize = true, Padding = new Padding(10, 3, 10, 3) };
+        openLog.Click += (_, _) => OpenLogFile();
+        Span(t, InlineRow(openLog));
+
         // 这三项任一变化都会影响"接管是否划算"，随手刷新提示
         _takeOver.CheckedChanged += (_, _) => RefreshPowerStatus();
         _idleEnabled.CheckedChanged += (_, _) => RefreshPowerStatus();
@@ -639,6 +656,24 @@ internal sealed class SettingsForm : Form
         }
     }
 
+    /// <summary>用记事本打开日志文件。先用一行写入触发文件创建，免得打开一个不存在的路径。</summary>
+    private void OpenLogFile()
+    {
+        try
+        {
+            _controller.Log.Write("程序", "用户打开了日志文件");
+            Process.Start(new ProcessStartInfo("notepad.exe", $"\"{_controller.Log.FilePath}\"")
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"打开日志失败：{ex.Message}", "显示器睡眠助手",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
     private static void OpenFolder(string directory)
     {
         try
@@ -677,6 +712,7 @@ internal sealed class SettingsForm : Form
         _showCountdown.Checked = _draft.ShowCountdown;
         _countdownSeconds.Value = Clamp(_draft.CountdownSeconds, _countdownSeconds);
         _overlay.Checked = _draft.OverlayFallback;
+        _enableLog.Checked = _draft.EnableLog;
         _suppressWake.Checked = _draft.SuppressSpuriousWake;
         _resleepWake.Checked = _draft.ResleepAfterSpuriousWake;
         _autoStart.Checked = AutostartService.IsEnabled();
@@ -837,6 +873,7 @@ internal sealed class SettingsForm : Form
         _draft.ShowCountdown = _showCountdown.Checked;
         _draft.CountdownSeconds = (int)_countdownSeconds.Value;
         _draft.OverlayFallback = _overlay.Checked;
+        _draft.EnableLog = _enableLog.Checked;
         _draft.SuppressSpuriousWake = _suppressWake.Checked;
         _draft.ResleepAfterSpuriousWake = _resleepWake.Checked;
 

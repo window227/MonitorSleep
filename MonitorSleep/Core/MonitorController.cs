@@ -68,6 +68,7 @@ internal sealed class MonitorController : IDisposable
     {
         _store = store;
         _settings = store.Load();
+        Log = new EventLog(store.DataDirectory) { Enabled = _settings.EnableLog };
         _powerScheme = new PowerSchemeService(_settings);
 
         _tickTimer = new System.Windows.Forms.Timer { Interval = 1000 };
@@ -103,6 +104,14 @@ internal sealed class MonitorController : IDisposable
     public bool IsDisplayOff => _displayOffTick is not null;
     public bool IsSleepQueued => _quietWaitSince is not null;
     public string LastBlockReason { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// 运行日志。
+    ///
+    /// 调用方只在「状态发生变化」时写 —— 避让判定和显示状态轮询都是每秒跑一次，
+    /// 在里面逐帧写会把日志刷爆。
+    /// </summary>
+    public EventLog Log { get; }
     public DateTime? ScheduledOffAt => _scheduledOffAt;
 
     /// <summary>「N 分钟后睡眠」的到点时刻；null 表示没排定。</summary>
@@ -197,6 +206,15 @@ internal sealed class MonitorController : IDisposable
 
     // ── 外部动作入口 ──
 
+    /// <summary>把触发来源翻译成日志里读得懂的字眼。</summary>
+    private static string TriggerName(SleepTrigger trigger) => trigger switch
+    {
+        SleepTrigger.Manual => "手动",
+        SleepTrigger.Scheduled => "定时到点",
+        SleepTrigger.Auto => "空闲自动",
+        _ => trigger.ToString(),
+    };
+
     public void SleepNow(SleepTrigger trigger)
     {
         if (_displayOffTick is not null || _sleepPending || _quietWaitSince is not null) return;
@@ -225,6 +243,7 @@ internal sealed class MonitorController : IDisposable
     public void ScheduleOff(TimeSpan delay)
     {
         _scheduledOffAt = DateTime.Now + delay;
+        Log.Write("操作", $"排定 {delay.TotalMinutes:0} 分钟后关屏");
         StateChanged?.Invoke();
     }
 
@@ -238,6 +257,7 @@ internal sealed class MonitorController : IDisposable
     public void ScheduleSleep(TimeSpan delay)
     {
         _scheduledSleepAt = DateTime.Now + delay;
+        Log.Write("操作", $"排定 {delay.TotalMinutes:0} 分钟后让电脑睡眠");
         StateChanged?.Invoke();
     }
 
@@ -252,6 +272,7 @@ internal sealed class MonitorController : IDisposable
     {
         _scheduledOffAt = null;
         _scheduledSleepAt = null;
+        Log.Write("操作", "取消了所有排定的定时");
         StateChanged?.Invoke();
     }
 
@@ -287,6 +308,7 @@ internal sealed class MonitorController : IDisposable
     /// </summary>
     public void SystemSleep()
     {
+        Log.Write("操作", "让电脑睡眠");
         if (_systemSleepPending) return;
 
         bool useCountdown = _settings.ShowCountdown
@@ -328,7 +350,14 @@ internal sealed class MonitorController : IDisposable
         }
 
         if (!NativeMethods.TrySystemSleep(out string error))
+        {
+            Log.Write("错误", $"进入睡眠失败：{error}");
             Notifier?.Invoke("进入睡眠失败", error);
+        }
+        else
+        {
+            Log.Write("系统", "已发送系统睡眠请求");
+        }
     }
 
     /// <summary>用户在设置里改了"接管系统关屏"后调用。</summary>
@@ -463,6 +492,9 @@ internal sealed class MonitorController : IDisposable
         if (_displayOffTick is not null) return;
 
         bool ok = NativeMethods.BroadcastMonitorPower(NativeMethods.MONITOR_OFF);
+        Log.Write("屏幕", ok
+            ? $"{TriggerName(trigger)}关屏 —— 已广播关闭显示请求"
+            : $"{TriggerName(trigger)}关屏 —— 没有窗口响应关屏请求");
         if (!ok)
         {
             if (_settings.OverlayFallback && OverlayPresenter is not null && OverlayPresenter())
@@ -503,6 +535,7 @@ internal sealed class MonitorController : IDisposable
         if (_scheduledSleepAt is DateTime sleepAt && DateTime.Now >= sleepAt)
         {
             _scheduledSleepAt = null;
+            Log.Write("操作", "定时到点 —— 让电脑睡眠");
             SystemSleep();
         }
 
@@ -540,6 +573,7 @@ internal sealed class MonitorController : IDisposable
         if (idle + TimeSpan.FromSeconds(1.5) >= sinceOff) return;
 
         _displayOffTick = null;
+        Log.Write("屏幕", "显示器被唤醒");
         ApplyExecutionState();
         StateChanged?.Invoke();
     }
@@ -705,6 +739,7 @@ internal sealed class MonitorController : IDisposable
         _resuppressCount++;
 
         LastBlockReason = "已抑制一次伪唤醒";
+        Log.Write("屏幕", $"抑制伪唤醒（第 {_resuppressCount} 次）—— 屏幕被无效输入点亮，重新关回去");
         NativeMethods.BroadcastMonitorPower(NativeMethods.MONITOR_OFF);
         StateChanged?.Invoke();
     }

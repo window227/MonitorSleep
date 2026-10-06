@@ -356,7 +356,14 @@ internal sealed class TrayContext : ApplicationContext
     private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
     {
         if (e.Mode == Microsoft.Win32.PowerModes.Resume)
+        {
+            _controller.Log.Write("系统", "电脑从睡眠中恢复");
             _controller.NoteResumed();
+        }
+        else if (e.Mode == Microsoft.Win32.PowerModes.Suspend)
+        {
+            _controller.Log.Write("系统", "电脑进入睡眠");
+        }
     }
 
     private void OnSessionEnding(object sender, Microsoft.Win32.SessionEndingEventArgs e)

@@ -110,6 +110,12 @@ public sealed class AppSettings
     public bool OverlayFallback { get; set; } = true;
 
     /// <summary>
+    /// 记录运行日志。默认开启 —— 日志是排查「屏幕为什么自己亮了」这类问题的唯一依据，
+    /// 而它的体积可控：512 KB 上限，超过自动轮转，只留一份历史。
+    /// </summary>
+    public bool EnableLog { get; set; } = true;
+
+    /// <summary>
     /// 伪唤醒抑制：屏幕被"没有真实输入"的事件点亮时，自动把它关回去。
     ///
     /// 典型场景：无线鼠标每隔几分钟切换一次节能模式，产生一条零位移报告，

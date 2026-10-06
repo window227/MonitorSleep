@@ -100,6 +100,8 @@ internal static class Program
         try
         {
             tray = new TrayContext(showSettingsEvent);
+            tray.Controller.Log.WriteSessionStart(
+                typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "未知");
             Application.Run(tray);
         }
         catch (Exception ex)
