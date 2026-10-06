@@ -349,16 +349,32 @@ internal sealed class MonitorController : IDisposable
             _executionStateApplied = false;
         }
 
+        // 请求时刻单独记一条 —— SetSuspendState 是阻塞的，要等系统醒过来才返回，
+        // 把日志写在它后面会让时间戳变成「醒来时刻」，差出几十分钟都有可能。
+        Log.Write("系统", "已发送系统睡眠请求");
+        var requestedAt = DateTime.Now;
+
         if (!NativeMethods.TrySystemSleep(out string error))
         {
             Log.Write("错误", $"进入睡眠失败：{error}");
             Notifier?.Invoke("进入睡眠失败", error);
+            return;
         }
-        else
-        {
-            Log.Write("系统", "已发送系统睡眠请求");
-        }
+
+        var slept = DateTime.Now - requestedAt;
+        Log.Write("系统", slept >= TimeSpan.FromSeconds(3)
+            ? $"系统从睡眠返回，本次睡了 {DescribeSpan(slept)}"
+            : "系统立刻返回 —— 这次没有真正进入睡眠（可能被别的程序挡了）");
     }
+
+    /// <summary>把时长写成人话，给日志用。</summary>
+    private static string DescribeSpan(TimeSpan span) =>
+        span.TotalHours >= 1 ? $"{(int)span.TotalHours} 小时 {span.Minutes} 分"
+        : span.TotalMinutes >= 1 ? $"{(int)span.TotalMinutes} 分 {span.Seconds} 秒"
+        : $"{span.TotalSeconds:0} 秒";
+
+    /// <summary>唤醒来源设备的后缀，供托盘层写日志用。</summary>
+    public string WakeDeviceSuffix => DescribeWakeDevice();
 
     /// <summary>用户在设置里改了"接管系统关屏"后调用。</summary>
     public void ApplyTakeOverSetting(bool quiet = false)

@@ -357,7 +357,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (e.Mode == Microsoft.Win32.PowerModes.Resume)
         {
-            _controller.Log.Write("系统", "电脑从睡眠中恢复");
+            _controller.Log.Write("系统", $"电脑从睡眠中恢复{_controller.WakeDeviceSuffix}");
             _controller.NoteResumed();
         }
         else if (e.Mode == Microsoft.Win32.PowerModes.Suspend)
