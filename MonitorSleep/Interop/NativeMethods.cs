@@ -676,6 +676,9 @@ internal static class NativeMethods
         return false;
     }
 
+    /// <summary>这条原始输入是不是来自鼠标。</summary>
+    public static bool IsMouseInput(in RAWINPUT input) => input.Type == RIM_TYPEMOUSE;
+
     private const uint RIDI_DEVICENAME = 0x20000007;
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]

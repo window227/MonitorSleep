@@ -644,6 +644,17 @@ internal sealed class MonitorController : IDisposable
             return;
         }
 
+        // 没看到真实输入 ≠ 伪唤醒。按一下键盘也能唤醒电脑，而键盘不会移动鼠标 ——
+        // 只凭「没看到真实输入」推断，就会把刚醒过来的用户又按回去睡。
+        // 所以必须拿到正面证据：恢复之后确实收到过「鼠标发来却没有位移」的报告。
+        bool spuriousEvidence = _rawInput is not null &&
+                                unchecked((int)(_rawInput.LastSuspiciousTick - resumed)) > 0;
+        if (!spuriousEvidence)
+        {
+            _resumedTick = null;   // 没证据就不动手，宁可漏一次也不误伤
+            return;
+        }
+
         uint now = unchecked((uint)Environment.TickCount);
         if (TimeSpan.FromMilliseconds(now - resumed) < ResleepGrace) return;
 
@@ -764,6 +775,10 @@ internal sealed class MonitorController : IDisposable
             _resuppressCount = 0;   // 用户回来了，计数归零
             return;
         }
+
+        // 同上：键盘唤醒不会动鼠标，必须有「鼠标零位移报告」这个正面证据才动手
+        bool spuriousEvidence = unchecked((int)(_rawInput.LastSuspiciousTick - _displayOffDetectedTick)) > 0;
+        if (!spuriousEvidence) return;
 
         if (_resuppressCount >= MaxResuppress) return;
         _resuppressCount++;

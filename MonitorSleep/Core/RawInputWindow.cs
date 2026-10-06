@@ -80,6 +80,9 @@ internal sealed class RawInputWindow : Form
     /// <summary>诊断计数：窗口一共收到多少条 WM_INPUT。</summary>
     public int RawInputMessages { get; private set; }
 
+    /// <summary>诊断计数：收到多少条「鼠标发来但没有位移」的可疑报告。</summary>
+    public int SuspiciousReports { get; private set; }
+
     /// <summary>诊断计数：窗口一共收到多少条 WM_POWERBROADCAST。</summary>
     public int PowerBroadcastMessages { get; private set; }
 
@@ -109,6 +112,16 @@ internal sealed class RawInputWindow : Form
     /// </summary>
     public IntPtr LastInputDevice { get; private set; }
 
+    /// <summary>
+    /// 最近一次「可疑报告」的时刻 —— 也就是**来自鼠标、但被判为非真实输入**的原始输入，
+    /// 典型就是无线鼠标切换节能模式时发出的那条零位移报告。
+    ///
+    /// 这是伪唤醒抑制的**正面证据**。不能用「没看到真实输入」去推断伪唤醒：
+    /// 键盘唤醒不会移动鼠标，在收不到 Raw Input 的环境下会被误判，
+    /// 结果把刚醒过来的用户又按回去睡。
+    /// </summary>
+    public uint LastSuspiciousTick { get; private set; }
+
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == NativeMethods.WM_INPUT)
@@ -123,6 +136,12 @@ internal sealed class RawInputWindow : Form
                 {
                     LastGenuineInputTick = unchecked((uint)Environment.TickCount);
                     LastGenuineDevice = input.Device;
+                }
+                else if (NativeMethods.IsMouseInput(in input))
+                {
+                    // 鼠标发来却没有任何位移 —— 就是它
+                    LastSuspiciousTick = unchecked((uint)Environment.TickCount);
+                    SuspiciousReports++;
                 }
             }
         }
