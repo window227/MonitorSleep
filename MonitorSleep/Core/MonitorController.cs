@@ -529,6 +529,7 @@ internal sealed class MonitorController : IDisposable
     private void OnTick()
     {
         TrackDisplayState();
+        TrackDisplayTransitions();
         TrackSpuriousWake();
         TrackSpuriousResume();
 
@@ -589,9 +590,43 @@ internal sealed class MonitorController : IDisposable
         if (idle + TimeSpan.FromSeconds(1.5) >= sinceOff) return;
 
         _displayOffTick = null;
-        Log.Write("屏幕", $"显示器被唤醒{DescribeWakeDevice()}");
         ApplyExecutionState();
         StateChanged?.Invoke();
+    }
+
+    private bool _lastKnownDisplayOff;
+
+    /// <summary>
+    /// 记录显示器的开关变化 —— **不论是我们关的还是 Windows 自己关的**。
+    ///
+    /// 以前只记「程序自己关的屏」，而很多用户（包括开发者本人）关屏其实是
+    /// Windows 在做（没开本程序的空闲自动关屏）。结果「屏幕自己亮了」这个现象
+    /// 在日志里查不到任何痕迹 —— 恰恰是最需要查的那件事。
+    ///
+    /// 判断依据来自 <see cref="CurrentDisplayOff"/>：系统通知优先，收不到通知时
+    /// 用空闲时长推断。推断出来的会标注「可能」，不假装是事实。
+    /// </summary>
+    private void TrackDisplayTransitions()
+    {
+        bool off = CurrentDisplayOff();
+        if (off == _lastKnownDisplayOff) return;
+
+        _lastKnownDisplayOff = off;
+
+        if (off)
+        {
+            // 我们自己关的那次，PerformSleep 已经记过一条，不重复
+            if (_displayOffTick is not null) return;
+
+            bool fromNotification = _rawInput?.DisplayStateChanges > 0;
+            Log.Write("屏幕", fromNotification
+                ? "显示器已关闭（系统所为）"
+                : "显示器可能已关闭（系统所为；系统通知收不到，按空闲时长推断）");
+        }
+        else
+        {
+            Log.Write("屏幕", $"显示器被唤醒{DescribeWakeDevice()}");
+        }
     }
 
     /// <summary>
