@@ -675,4 +675,61 @@ internal static class NativeMethods
 
         return false;
     }
+
+    private const uint RIDI_DEVICENAME = 0x20000007;
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern uint GetRawInputDeviceInfo(IntPtr device, uint command, IntPtr data, ref uint size);
+
+    /// <summary>
+    /// 把原始输入的设备句柄解析成设备接口路径，
+    /// 例如 \\?\HID#VID_3554&amp;PID_FA09#...#{884b96c3-...}。
+    ///
+    /// 这是 Windows 自己不会告诉你的信息 —— 系统把唤醒归因到 USB 主控器，
+    /// 不说是挂在它下面的哪个设备；而原始输入里带着确切句柄。
+    ///
+    /// 注意：RIDI_DEVICENAME 的 size 单位是**字符数**而不是字节，和其它命令不一样。
+    /// </summary>
+    public static string? DescribeRawInputDevice(IntPtr device)
+    {
+        if (device == IntPtr.Zero) return null;
+
+        try
+        {
+            uint size = 0;
+            if (GetRawInputDeviceInfo(device, RIDI_DEVICENAME, IntPtr.Zero, ref size) != 0) return null;
+            if (size == 0 || size > 1024) return null;
+
+            IntPtr buffer = Marshal.AllocHGlobal((int)size * sizeof(char));
+            try
+            {
+                if (GetRawInputDeviceInfo(device, RIDI_DEVICENAME, buffer, ref size) == 0) return null;
+                return Marshal.PtrToStringUni(buffer);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 把设备路径压成人一眼能看懂的形式：
+    /// \\?\HID#VID_3554&amp;PID_FA09#7&amp;1234&amp;0&amp;0000#{...} → VID_3554&amp;PID_FA09
+    /// 认不出 VID/PID 时原样返回。
+    /// </summary>
+    public static string DescribeDeviceBriefly(string? devicePath)
+    {
+        if (string.IsNullOrEmpty(devicePath)) return "未知设备";
+
+        int start = devicePath.IndexOf("VID_", StringComparison.OrdinalIgnoreCase);
+        if (start < 0) return devicePath;
+
+        int end = devicePath.IndexOf('#', start);
+        return end > start ? devicePath.Substring(start, end - start) : devicePath.Substring(start);
+    }
 }

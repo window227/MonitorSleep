@@ -573,9 +573,21 @@ internal sealed class MonitorController : IDisposable
         if (idle + TimeSpan.FromSeconds(1.5) >= sinceOff) return;
 
         _displayOffTick = null;
-        Log.Write("屏幕", "显示器被唤醒");
+        Log.Write("屏幕", $"显示器被唤醒{DescribeWakeDevice()}");
         ApplyExecutionState();
         StateChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// 拼出「 · 来源设备: ...」这一段，给唤醒类日志用。
+    ///
+    /// Windows 只会把唤醒归因到 USB 主控器，不说是挂在下面的哪个设备；
+    /// 原始输入里带着确切句柄，所以这里能补上系统不提供的那部分信息。
+    /// </summary>
+    private string DescribeWakeDevice()
+    {
+        string? path = NativeMethods.DescribeRawInputDevice(_rawInput?.LastGenuineDevice ?? IntPtr.Zero);
+        return path is null ? string.Empty : $" · 来源设备: {NativeMethods.DescribeDeviceBriefly(path)}";
     }
 
     private void EndDisplayOffSession() => _displayOffTick = null;
@@ -739,7 +751,7 @@ internal sealed class MonitorController : IDisposable
         _resuppressCount++;
 
         LastBlockReason = "已抑制一次伪唤醒";
-        Log.Write("屏幕", $"抑制伪唤醒（第 {_resuppressCount} 次）—— 屏幕被无效输入点亮，重新关回去");
+        Log.Write("屏幕", $"抑制伪唤醒（第 {_resuppressCount} 次）—— 屏幕被无效输入点亮{DescribeWakeDevice()}，重新关回去");
         NativeMethods.BroadcastMonitorPower(NativeMethods.MONITOR_OFF);
         StateChanged?.Invoke();
     }

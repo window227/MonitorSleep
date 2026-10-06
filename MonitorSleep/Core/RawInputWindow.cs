@@ -92,6 +92,14 @@ internal sealed class RawInputWindow : Form
     /// <summary>诊断计数：其中属于"显示器开关状态"的有多少条。</summary>
     public int DisplayStateChanges { get; private set; }
 
+    /// <summary>
+    /// 最近一次真实输入来自哪个设备（原始输入句柄）。
+    ///
+    /// 只存句柄不存名字 —— 鼠标一动每秒几十条，每次都去解析设备路径太浪费；
+    /// 等真要写日志（唤醒那一刻）再解析。
+    /// </summary>
+    public IntPtr LastGenuineDevice { get; private set; }
+
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == NativeMethods.WM_INPUT)
@@ -99,7 +107,10 @@ internal sealed class RawInputWindow : Form
             RawInputMessages++;
             var raw = NativeMethods.ReadRawInput(m.LParam);
             if (raw is { } input && NativeMethods.IsGenuineInput(in input))
+            {
                 LastGenuineInputTick = unchecked((uint)Environment.TickCount);
+                LastGenuineDevice = input.Device;
+            }
         }
         else if (m.Msg == NativeMethods.WM_POWERBROADCAST)
         {
