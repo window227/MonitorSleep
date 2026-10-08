@@ -187,7 +187,7 @@ internal sealed class SettingsForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 2,
-            Padding = new Padding(14),
+            Padding = new Padding(10),   // 14 在 1080p 上让页面顶满屏幕，收紧一点
         };
         t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230));
         t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -205,7 +205,7 @@ internal sealed class SettingsForm : Form
             Height = 1,
             BackColor = Color.FromArgb(212, 212, 212),
             Anchor = AnchorStyles.Left | AnchorStyles.Right,
-            Margin = new Padding(3, 16, 3, 0),
+            Margin = new Padding(3, 10, 3, 0),
         };
         t.Controls.Add(line, 0, r);
         t.SetColumnSpan(line, 2);
@@ -223,7 +223,7 @@ internal sealed class SettingsForm : Form
             Text = text,
             AutoSize = true,
             Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
-            Margin = new Padding(3, 6, 3, 6),   // 上方的留白交给分隔线提供
+            Margin = new Padding(3, 4, 3, 4),   // 上方的留白交给分隔线提供
         };
         t.Controls.Add(lbl, 0, r);
         t.SetColumnSpan(lbl, 2);
@@ -233,9 +233,9 @@ internal sealed class SettingsForm : Form
     {
         t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         int r = t.RowStyles.Count - 1;
-        var lbl = new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 9, 3, 3) };
+        var lbl = new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 5, 3, 3) };
         c.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-        c.Margin = new Padding(3, 5, 3, 5);
+        c.Margin = new Padding(3, 3, 3, 3);
         t.Controls.Add(lbl, 0, r);
         t.Controls.Add(c, 1, r);
     }
@@ -245,7 +245,7 @@ internal sealed class SettingsForm : Form
         t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         int r = t.RowStyles.Count - 1;
         c.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-        c.Margin = new Padding(3, 6, 3, 6);
+        c.Margin = new Padding(3, 4, 3, 4);
         t.Controls.Add(c, 0, r);
         t.SetColumnSpan(c, 2);
     }
