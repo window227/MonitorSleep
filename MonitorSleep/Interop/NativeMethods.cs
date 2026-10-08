@@ -18,6 +18,12 @@ internal static class NativeMethods
     public const int MONITOR_LOWPOWER = 1;
     public const int MONITOR_OFF = 2;
 
+    // 注意：查询返回值的含义和上面的「命令」不一样 ——
+    // 查询时是 1=开着 / 2=关着 / -1=问不出来，而命令里的 -1 表示「打开」。
+    public const int QUERY_UNKNOWN = -1;
+    public const int QUERY_ON = 1;
+    public const int QUERY_OFF = 2;
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SendMessageTimeout(
         IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
@@ -37,6 +43,49 @@ internal static class NativeMethods
         {
             return false;
         }
+    }
+
+    // 查询结果缓存：一个 tick 里会问好几次，没必要每次都广播一遍
+    private static int _cachedMonitorPower = int.MinValue;
+    private static uint _cachedMonitorPowerAt;
+
+    /// <summary>
+    /// 直接问系统：显示器现在是开还是关？
+    ///
+    /// 用的是和关屏**同一个通道** —— 广播 WM_SYSCOMMAND / SC_MONITORPOWER，
+    /// 区别只在 lParam：传 -1 是「查询」，传 2 是「关闭」。
+    /// 返回 <see cref="QUERY_ON"/> / <see cref="QUERY_OFF"/> / <see cref="QUERY_UNKNOWN"/>。
+    ///
+    /// 这比按空闲时长推断可靠得多 —— 推断分不清「屏幕关了」和「屏幕亮着但一直没人动鼠标」，
+    /// 而后者在放视频、做演示时是常态。
+    /// </summary>
+    public static int QueryMonitorPower()
+    {
+        uint now = unchecked((uint)Environment.TickCount);
+        if (_cachedMonitorPower != int.MinValue && unchecked(now - _cachedMonitorPowerAt) < 800)
+            return _cachedMonitorPower;
+
+        int result = QUERY_UNKNOWN;
+        try
+        {
+            var ok = SendMessageTimeout(
+                HWND_BROADCAST, WM_SYSCOMMAND, (IntPtr)SC_MONITORPOWER, (IntPtr)(-1),
+                SMTO_ABORTIFHUNG, 1000, out IntPtr answer);
+
+            if (ok != IntPtr.Zero)
+            {
+                int value = answer.ToInt32();
+                if (value is QUERY_ON or QUERY_OFF) result = value;
+            }
+        }
+        catch
+        {
+            // 问不出来就返回 UNKNOWN，由调用方决定退路
+        }
+
+        _cachedMonitorPower = result;
+        _cachedMonitorPowerAt = now;
+        return result;
     }
 
     // ───────────────────────── 空闲时长 ─────────────────────────

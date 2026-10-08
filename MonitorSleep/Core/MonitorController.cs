@@ -714,10 +714,13 @@ internal sealed class MonitorController : IDisposable
     /// </summary>
     private bool CurrentDisplayOff()
     {
-        if (_rawInput is null) return false;
+        // 先直接问系统 —— 这是事实，不是推断
+        int power = NativeMethods.QueryMonitorPower();
+        if (power != NativeMethods.QUERY_UNKNOWN)
+            return power == NativeMethods.QUERY_OFF;
 
-        // 收到过通知 → 以通知为准
-        if (_rawInput.DisplayStateChanges > 0) return _rawInput.IsDisplayOff;
+        // 问不出来才退回通知，最后才轮到推断
+        if (_rawInput is { DisplayStateChanges: > 0 }) return _rawInput.IsDisplayOff;
 
         return InferDisplayOffFromIdle();
     }
@@ -788,7 +791,14 @@ internal sealed class MonitorController : IDisposable
     private bool KnownDisplayOff()
     {
         if (_displayOffTick is not null) return true;   // 我们关的
-        return _rawInput is { DisplayStateChanges: > 0, IsDisplayOff: true };   // 通知确认的
+
+        // 直接问系统 —— 这才是「确凿依据」，而不是推断
+        int power = NativeMethods.QueryMonitorPower();
+        if (power != NativeMethods.QUERY_UNKNOWN)
+            return power == NativeMethods.QUERY_OFF;
+
+        // 查询不支持的机器上，退回系统通知
+        return _rawInput is { DisplayStateChanges: > 0, IsDisplayOff: true };
     }
 
     private void TrackSpuriousWake()

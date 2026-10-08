@@ -257,6 +257,15 @@ internal sealed class RawInputWindow : Form
         // 得能把设备句柄解析成 VID/PID 才算真的可用。
         lines.Add(DescribeDeviceChain());
 
+        // 屏幕状态能不能直接问出来 —— 这决定抑制是「依据事实」还是「依据推断」
+        int power = NativeMethods.QueryMonitorPower();
+        lines.Add(power switch
+        {
+            NativeMethods.QUERY_ON => "  屏幕状态查询    : ✅ 返回「开着」",
+            NativeMethods.QUERY_OFF => "  屏幕状态查询    : ✅ 返回「关着」",
+            _ => "  屏幕状态查询    : ❌ 问不出来 —— 只能退回空闲时长推断（分不清「屏幕关了」和「屏幕亮着但没人动」）",
+        });
+
         // ── 2) 显示状态通知是否真的送达 ──
         NativeMethods.BroadcastMonitorPower(NativeMethods.MONITOR_OFF);
         sw.Restart();
