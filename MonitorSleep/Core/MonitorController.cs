@@ -774,6 +774,23 @@ internal sealed class MonitorController : IDisposable
     /// 这里必须用 Raw Input 而不是"距上次输入的时间"：后者只知道"有输入"，
     /// 分不出那是用户动手还是设备自己发的报告。
     /// </summary>
+    /// <summary>
+    /// 屏幕是否**确凿**处于关闭状态。
+    ///
+    /// 和 <see cref="CurrentDisplayOff"/> 的区别很关键：那个在系统通知收不到时会用
+    /// 「空闲超过系统超时」去**推断**，而推断可能是错的 —— 放视频、做演示、跑全屏程序
+    /// 都会让屏幕亮着但空闲很久。
+    ///
+    /// 一旦把这种误判当成「屏幕关过」，紧接着一条鼠标节能报告就会被认作伪唤醒，
+    /// 结果**在看视频的时候把屏幕关掉**。所以执行抑制只认确凿依据：
+    /// 系统通知，或者我们自己关的那一次。推断只用于写日志。
+    /// </summary>
+    private bool KnownDisplayOff()
+    {
+        if (_displayOffTick is not null) return true;   // 我们关的
+        return _rawInput is { DisplayStateChanges: > 0, IsDisplayOff: true };   // 通知确认的
+    }
+
     private void TrackSpuriousWake()
     {
         if (_rawInput is null) return;
@@ -783,11 +800,11 @@ internal sealed class MonitorController : IDisposable
 
         if (!_settings.SuppressSpuriousWake)
         {
-            _displayWasOff = CurrentDisplayOff();
+            _displayWasOff = KnownDisplayOff();
             return;
         }
 
-        bool displayOff = CurrentDisplayOff();
+        bool displayOff = KnownDisplayOff();
 
         if (displayOff)
         {
